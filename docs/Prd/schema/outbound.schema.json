@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kds.local/schema/v1/outbound.schema.json",
+  "title": "KDS 出站回执 v1（KDS → POS）",
+  "description": "8 个出站事件。出站字段一律宽松（additionalProperties: true）——KDS 新增字段不应打断 POS，POS 忽略未知字段即可。",
+  "$ref": "common.schema.json",
+  "oneOf": [
+    { "$ref": "#/$defs/ItemComplete" },
+    { "$ref": "#/$defs/ItemCancelled" },
+    { "$ref": "#/$defs/OrderDone" },
+    { "$ref": "#/$defs/ItemVoid" },
+    { "$ref": "#/$defs/Heartbeat" },
+    { "$ref": "#/$defs/ErrorEvent" },
+    { "$ref": "#/$defs/ItemUndo" },
+    { "$ref": "#/$defs/ItemUnableToCook" },
+    { "$ref": "#/$defs/ItemSoldOutRequest" }
+  ],
+  "$defs": {
+
+    "Base": {
+      "type": "object",
+      "allOf": [{ "$ref": "common.schema.json#/$defs/Envelope" }],
+      "required": ["EventType", "Payload"],
+      "additionalProperties": true
+    },
+
+    "ItemComplete": {
+      "description": "某明细某阶段划单完成（含部分完成）。★ IsFullComplete 必填：POS 无论支不支持部分语义都必须接收，不得静默丢弃（§4.7）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Complete" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "Stage", "CompletedQty", "Qty", "RemainingQty", "IsFullComplete", "CompletedAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DetailId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "Stage": { "$ref": "common.schema.json#/$defs/Stage", "description": "本次完成的阶段" },
+            "CompletedQty": { "$ref": "common.schema.json#/$defs/PositiveQty", "description": "**本次**完成份数（不是累计）" },
+            "Qty": { "$ref": "common.schema.json#/$defs/Qty", "description": "整行份数" },
+            "RemainingQty": { "$ref": "common.schema.json#/$defs/Qty", "description": "剩余未完成份数 = Qty − CancelledQty − CompletedQty" },
+            "IsFullComplete": { "type": "boolean", "description": "本阶段是否已全量完成（RemainingQty = 0）" },
+            "TerminalId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "StationId": { "$ref": "common.schema.json#/$defs/Guid", "description": "当前阶段主档口（§2.2.1）" },
+            "CompletedAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+            "StageElapsedSeconds": { "type": "integer", "minimum": 0, "description": "本阶段耗时（仅统计用）" },
+            "ProducedSeconds": { "type": "integer", "minimum": 0, "description": "总出品时长 = ProducedAt − LastFireAt（§4.4.1）" },
+            "SkippedStages": {
+              "type": "array",
+              "items": { "$ref": "common.schema.json#/$defs/Stage" },
+              "description": "越级完成时被跳过的阶段（§2.7.1）。**KDS 只发当前阶段，不补发前态**——POS 应推断『该阶段之前全部完成』"
+            }
+          }
+        }
+      }
+    },
+
+    "ItemCancelled": {
+      "description": "退菜（含部分退）。★ IsFullCancel 必填，POS 不得静默丢弃",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Cancelled" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "CancelledQty", "Qty", "RemainingQty", "IsFullCancel", "CancelledAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DetailId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "CancelledQty": { "$ref": "common.schema.json#/$defs/PositiveQty", "description": "**本次**退份数" },
+            "Qty": { "$ref": "common.schema.json#/$defs/Qty" },
+            "RemainingQty": { "$ref": "common.schema.json#/$defs/Qty" },
+            "IsFullCancel": { "type": "boolean", "description": "是否整行退完（CancelledQty = Qty）" },
+            "Reason": { "type": "string", "maxLength": 200 },
+            "CancelledAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+            "Source": { "type": "string", "enum": ["Pos", "Kitchen", "CrossDayAutoClose"], "description": "退菜来源。Kitchen 仅当 AllowKitchenCancel=1；CrossDayAutoClose 为跨营业日清理（§2.14）" }
+          }
+        }
+      }
+    },
+
+    "OrderDone": {
+      "description": "整单全部明细到达终态",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Done" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "CompletedAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "CompletedAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+            "TotalElapsedSeconds": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "ItemVoid": {
+      "description": "报损（KDS 管理端发起）。与入站 Item.Void 对称，额外带操作人",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Void" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "VoidQty", "VoidedAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DetailId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "VoidQty": { "$ref": "common.schema.json#/$defs/PositiveQty" },
+            "VoidReasonCode": { "$ref": "common.schema.json#/$defs/VoidReasonCode" },
+            "VoidRemark": { "type": "string", "maxLength": 200 },
+            "VoidedBy": { "type": "string", "maxLength": 64, "description": "操作人（标注，不做权限判断）" },
+            "VoidedAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "Heartbeat": {
+      "description": "定时心跳，供 POS 侧监控 KDS 存活与积压",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Heartbeat" },
+        "Payload": {
+          "type": "object",
+          "required": ["StoreId", "SentAt"],
+          "additionalProperties": true,
+          "properties": {
+            "StoreId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "SentAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+            "PendingOutboxCount": { "type": "integer", "minimum": 0, "description": "待发表积压数" },
+            "OldestPendingSeconds": { "type": "integer", "minimum": 0, "description": "最老待发表滞留时长" },
+            "DbHealthy": { "type": "boolean" }
+          }
+        }
+      }
+    },
+
+    "ErrorEvent": {
+      "description": "事件处理失败通知",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Error" },
+        "Payload": {
+          "type": "object",
+          "required": ["ErrorCode", "ErrorMessage"],
+          "additionalProperties": true,
+          "properties": {
+            "EventId": { "$ref": "common.schema.json#/$defs/Guid", "description": "出错的入站事件" },
+            "ErrorCode": { "$ref": "common.schema.json#/$defs/ErrorCode" },
+            "ErrorMessage": { "type": "string", "maxLength": 500 },
+            "TraceId": { "type": "string", "maxLength": 64 }
+          }
+        }
+      }
+    },
+
+    "ItemUndo": {
+      "description": "撤销划单（§2.19.6）。POS 须把该菜品出餐状态**退回一格**；越级撤销时中间跳过阶段不发事件",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Undo" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "UndoStage", "RestoredStage", "OccurredAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DetailId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "UndoStage": { "$ref": "common.schema.json#/$defs/Stage", "description": "被撤销的阶段" },
+            "RestoredStage": { "oneOf": [{ "$ref": "common.schema.json#/$defs/Stage" }, { "const": "Pending" }], "description": "回退到的阶段（= 操作前的 FromStage；越级 A→C 撤销回 A）" },
+            "Qty": { "$ref": "common.schema.json#/$defs/Qty", "description": "被撤销的份数（部分划单时 < Qty）" },
+            "OccurredAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "ItemSoldOutRequest": {
+      "description": "沽清申请 / 沽清通知（KDS → POS）。★ 菜单动作非订单动作，PosOrderNo 缺省。Mode = Request 时请 POS 确认后推 Item.SoldOut 回执；Mode = Notify 表示 KDS 已直接生效（SoldOutMode=KdsDirect），请 POS 同步菜单。批量品项用 Items 数组。",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.SoldOutRequest" },
+        "Payload": {
+          "type": "object",
+          "required": ["Mode", "Items"],
+          "additionalProperties": true,
+          "properties": {
+            "Mode": {
+              "type": "string",
+              "enum": ["Request", "Notify"],
+              "description": "Request = 请 POS 确认后生效（PosConfirm）；Notify = KDS 已本地生效，请 POS 同步菜单（KdsDirect）。复用同一事件避免为一模式再造类型"
+            },
+            "Items": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["Target"],
+                "additionalProperties": true,
+                "properties": {
+                  "Target": { "$ref": "common.schema.json#/$defs/SoldOutTarget" },
+                  "SoldOutType": { "$ref": "common.schema.json#/$defs/SoldOutType" },
+                  "LimitQty": { "$ref": "common.schema.json#/$defs/Qty", "description": "仅 LimitedQty" },
+                  "EndAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset", "description": "仅 UntilTime：预定恢复时刻" }
+                }
+              }
+            },
+            "ReasonCode": { "$ref": "common.schema.json#/$defs/SoldOutReasonCode" },
+            "Remark": { "type": "string", "maxLength": 200 },
+            "RequestedBy": { "type": "string", "maxLength": 64, "description": "发起人（屏账号或管理端账号）" },
+            "RequestedAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+            "PosOrderNo": { "type": "string", "maxLength": 64, "description": "可选：若由某单触发（如最后一单卖掉最后一份）可关联；通常缺省" }
+          }
+        }
+      }
+    },
+
+    "ItemUnableToCook": {
+      "description": "沽清申请：厨房做不了（食材没了/设备故障），**请 POS 决定是否退菜**。KDS 不自行改数量（§4.7.2）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.UnableToCook" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "Reason", "RequestedAt"],
+          "additionalProperties": true,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DetailId": { "$ref": "common.schema.json#/$defs/Guid" },
+            "Reason": { "type": "string", "maxLength": 200, "description": "自由文本（如『鲈鱼已售完』）" },
+            "RequestedBy": { "type": "string", "maxLength": 64 },
+            "RequestedAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    }
+
+  }
+}

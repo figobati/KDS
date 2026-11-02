@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KDS v2 · 满铺自适应原型比稿</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{
+  background:#151A21;color:#E8EEF6;
+  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",-apple-system,sans-serif;
+  display:grid;grid-template-rows:auto 1fr auto;height:100vh;
+}
+header{
+  display:flex;align-items:center;gap:14px;padding:14px 22px;
+  border-bottom:1px solid #232B36;background:#11161C;flex-wrap:wrap;
+}
+h1{font-size:16px;font-weight:800;letter-spacing:.02em}
+h1 span{color:#5B8CFF}
+.tag{font-size:11px;color:#7A8798;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid #2A3441;padding:3px 8px;border-radius:5px}
+.sp{flex:1}
+.grp{display:flex;align-items:center;gap:6px}
+.grp > label{font-size:11px;color:#6E7B8C;margin-inline-end:2px}
+.grp button{
+  height:28px;padding:0 11px;border-radius:7px;background:#1D242E;border:1px solid #2A3441;
+  color:#A9B6C6;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;
+}
+.grp button.on{background:#2F6BFF;border-color:#2F6BFF;color:#fff}
+/* 入口分组分隔线：数据视图（桌台/合菜/单菜）与流程页（登录）不是同一类东西，
+   中间用一道竖线断开，避免被读成「第四种视图」。 */
+.grp .sep{flex:none;width:1px;height:18px;background:#2A3441;margin:0 3px}
+
+/* 预览框高度必须由 grid 轨道显式撑满（minmax(0,1fr)）。
+   踩过的坑：这里原本写 align-content:center，轨道退化成「按内容定高」，
+   而 iframe 是 position:absolute（不参与撑高），.stage 的自适应高度就成了 0 ——
+   结果是两个预览框完全看不见，只剩上下两条黑边。 */
+main{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr);
+  gap:16px;padding:16px 22px;min-height:0}
+.pane{display:flex;flex-direction:column;min-height:0;min-width:0;gap:8px}
+.ph{display:flex;align-items:center;gap:10px;padding:0 2px}
+.ph b{font-size:13.5px;font-weight:800}
+.ph .p{font-size:11.5px;color:#6E7B8C}
+/* 设计尺寸标注：作业屏 1920×1080 与管理端 1440×900 不是同一个基准，
+   不标出来会让人误判「管理端字太小」。 */
+.ph .dims{
+  font-size:10.5px;font-weight:800;color:#7A8798;letter-spacing:.04em;
+  border:1px solid #2A3441;border-radius:5px;padding:2px 6px;white-space:nowrap;
+}
+.ph a{
+  margin-inline-start:auto;font-size:11.5px;font-weight:700;color:#8FB0FF;text-decoration:none;
+  border:1px solid #2A3B58;background:#1A2230;padding:4px 9px;border-radius:6px;white-space:nowrap;
+}
+.ph a:hover{background:#22304A}
+.stage{
+  flex:1;min-height:0;position:relative;overflow:hidden;
+  border-radius:12px;border:1px solid #29323E;background:#0C1117;
+  box-shadow:0 20px 50px rgba(0,0,0,.45);
+}
+/* 画布尺寸由 JS 按入口写入（作业屏 1920×1080 / 管理端 1440×900），
+   这里只负责「按 transform 缩放并居中」，不再写死 16:9 —— 管理端是 16:10。 */
+.stage iframe{
+  position:absolute;top:0;left:0;border:0;
+  transform-origin:top left;background:#0C1117;
+}
+.theme-a .stage{border-color:#3A2B2B}
+.theme-b .stage{border-color:#33404F}
+
+footer{
+  padding:9px 22px;border-top:1px solid #232B36;background:#11161C;
+  font-size:11.5px;color:#6E7B8C;display:flex;gap:18px;flex-wrap:wrap;align-items:center;
+}
+footer b{color:#A9B6C6;font-weight:700}
+kbd{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#1D242E;border:1px solid #2E3947;
+  border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:#C3CEDA}
+@media (max-width:900px){
+  main{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>KDS v2 <span>· 满铺自适应</span></h1>
+  <span class="tag" id="hdrTag">等比预览 · 按入口画幅</span>
+  <div class="sp"></div>
+
+  <div class="grp">
+    <label>语言</label>
+    <button data-lang="zh" class="on">中文</button>
+    <button data-lang="zh-TW">繁體</button>
+    <button data-lang="en">EN</button>
+    <button data-lang="de">DE</button>
+    <button data-lang="ru">RU</button>
+    <button data-lang="ar">AR</button>
+  </div>
+  <div class="grp" id="entryGrp">
+    <label>入口</label>
+    <!-- 按钮由底部脚本的 ENTRIES 数组生成：以后新增页面只改那一处 -->
+  </div>
+</header>
+
+<main>
+  <div class="pane theme-a" id="paneA">
+    <div class="ph">
+      <b>A · 夜航控制台</b><span class="p">深色 / 远距离 / 夜间档</span>
+      <span class="dims" id="dimsA">1920×1080</span>
+      <a href="app.html?theme=a" target="_blank">全屏打开 ↗</a>
+    </div>
+    <div class="stage"><iframe id="fA" title="方案A"></iframe></div>
+  </div>
+  <div class="pane theme-b" id="paneB">
+    <div class="ph">
+      <b>B · 晨光大卡片</b><span class="p">浅色 / 强光环境 / 大字号</span>
+      <span class="dims" id="dimsB">1920×1080</span>
+      <a href="app.html?theme=b" target="_blank">全屏打开 ↗</a>
+    </div>
+    <div class="stage"><iframe id="fB" title="方案B"></iframe></div>
+  </div>
+</main>
+
+<footer>
+  <span id="footTip">右下角 <b>⚙</b> 打开「显示与布局」面板</span>
+  <span id="footKey"><kbd>←</kbd><kbd>→</kbd> 翻页</span>
+  <span id="footLang"><b>语言</b>切换会立刻暴露所有换行与截断问题，可配合面板里的「溢出审计」逐处核对</span>
+  <span id="footNav"></span>
+</footer>
+
+<script>
+/* ============================================================
+   入口清单 —— 以后新增页面 / 新视图，只改这一个数组
+   ------------------------------------------------------------
+   id    : 传给 app.html 的 ?view= 参数值（app.html 里必须存在同名视图）
+   label : 顶部入口按钮文案
+   sep   : 在这一项之前插一道竖线（用于把「流程页」和「数据视图」分开）
+   tip   : 底部说明，写清这一屏要验证什么
+   paged : 这一屏是否有分页 —— 决定要不要提示 ← → 翻页（登录这类无分页的屏必须置 false）
+   ============================================================ */
+const ENTRIES = [
+  { id:'table', label:'桌台', paged:true,
+    tip:'右下角 <b>⚙</b> 打开「显示与布局」面板：<b>配置对象（桌台/合菜/单菜/全工序）· 列数 · 行数 · 字号缩放 · 语言 · 菜名单双行 · 强反光</b> 实时生效；三种模式各自记住行列与字号，全工序另记一本（数据量明显更大）' },
+  { id:'merge', label:'合菜', paged:true,
+    tip:'右下角 <b>⚙</b> 打开面板：合菜卡按菜品聚合，左侧网格顶部与右侧面板齐平（此前多一条与顶栏重复的筛选条，已去掉）' },
+  { id:'single', label:'单菜', paged:true,
+    tip:'右下角 <b>⚙</b> 打开面板：一卡一菜的小卡形态，各视图的行列与字号<b>各自独立</b>，改一个不影响另外几个' },
+  { id:'comboAll', label:'全工序', file:'app.html', paged:true, view:'single', qs:'scope=all',
+    tip:'A-06 综合屏＝「范围」切到<b>全工序</b>，不是第四种视图 —— 三种模式（桌台/合菜/单菜）都能在全工序下跑，共用同一套渲染，只换数据源并强制标档口。默认<b>只读</b>：只隐藏会改状态的控件（划单/催菜/叫号），<b>等待时长与份数照常显示</b>；顶栏「我的划单」同时收起' },
+  { id:'login', label:'登录', sep:true, paged:false,
+    tip:'登录态会收起顶栏全部业务入口（视图切换 / 筛选 / 搜索 / 操作员 / 划单），只留<b>品牌块与时钟</b> —— 未登录却显示「张师傅」是自相矛盾；面板入口也在收起范围内，所以这一屏没有 ⚙' },
+  { id:'settings', label:'设置', paged:false,
+    tip:'A-12 屏端设置：<b>行列数给建议值但绝不自动改值</b>；字号 S/M/L 三档<b>并排小样预览</b>；本页是作业屏<b>唯一允许滚动</b>的页（配 ▲▼）；数据库区切到「普通屏」会整组消失；「搜索回车划整桌」旁有红字警示' },
+
+  /* —— 以下四个是管理端（桌面鼠标，1440×900），跑在 admin.html —— */
+  { id:'dash', label:'看板', file:'admin.html', w:1440, h:900, sep:true, paged:false,
+    tip:'B-03 概览看板：5 个 KPI（含<b>报损数</b>）+ 折线 + 横向条形（<b>不做饼图</b>）+ 时间控件「今天 / 最近5日 / 最近7日 / 最近30日」+ 常驻异常提醒区；排行榜含饮品酒水，右侧「酒水 TOP」子榜可开关对照' },
+  { id:'report', label:'日报', file:'admin.html', w:1440, h:900, paged:false,
+    tip:'B-04 日报：<b>损耗总览＝退菜＋报损</b>合并成一张卡并写明公式 —— 分两处会让店长以为「退菜不算损耗」' },
+  { id:'health', label:'体检', file:'admin.html', w:1440, h:900, paged:false,
+    tip:'B-18 健康检查：路由 10 / 打印 7 / 语言 9 / 数据库 4 共 30 项，每项带【去修复】，Error 阻断保存、Warn 仅提示；下方 B-19 路由矩阵四态 <b>● ◐ ○ ●!</b> 与自检共用同一解析器' },
+  { id:'wizard', label:'向导', file:'admin.html', w:1440, h:900, paged:false,
+    tip:'B-02 初始化向导：五步 + 时区只读 + 门店编码创建后不可改 + 业态<b>仅预设默认值</b> + 跳过后补 + 重入提示条；最后一步是建库 / 迁移 / 种子三条进度' },
+];
+
+const S = { lang:'zh', view:'table' };
+const fA = document.getElementById('fA'), fB = document.getElementById('fB');
+const entryGrp = document.getElementById('entryGrp');
+
+/* 入口可能落在不同文件：作业屏走 app.html（默认），管理端走 admin.html。
+   管理端的 view 参数必须显式带上（它的默认视图是 dash，不是 table）。 */
+function src(theme){
+  const e = entry();
+  const p = new URLSearchParams({theme});
+  if(S.lang !== 'zh') p.set('lang', S.lang);
+  if(e.file === 'admin.html'){
+    p.set('view', e.id);
+    /* 管理端要区分鼠标/触控两套密度：这里是「预览容器」，按当前设备的指针类型透传，
+       免得在触摸一体机上打开比稿页、却看到一屏子 28px 的小按钮而误判「管理端没法摸」 */
+    if(window.matchMedia && window.matchMedia('(pointer:coarse)').matches) p.set('input','touch');
+  }
+  else {
+    /* id 是入口的唯一键，view 才是真正传给页面的模式名 —— 两者必须分开：
+       「全工序」与「单菜」渲染的都是 single 模式，只是范围不同，
+       若拿 id 当 view，两个入口会撞成同一个键，qs 就传不下去了。 */
+    const v = e.view || e.id;
+    if(v !== 'table') p.set('view', v);
+  }
+  /* 入口自带的额外参数（如「全工序」的 scope=all）原样透传 */
+  if(e.qs) new URLSearchParams(e.qs).forEach((v,k)=> p.set(k,v));
+  return (e.file || 'app.html') + '?' + p.toString();
+}
+/* 当前入口配置：入口按钮高亮、底部文案、翻页提示都从这里取 */
+function entry(){ return ENTRIES.find(e=>e.id===S.view) || ENTRIES[0]; }
+
+function syncEntries(){
+  entryGrp.querySelectorAll('[data-view]').forEach(b=>
+    b.classList.toggle('on', b.dataset.view===S.view));
+  const e = entry();
+  document.getElementById('footTip').innerHTML = e.tip;
+  /* 登录页没有卡片网格，翻页提示留着就是误导，跟着入口收起。
+     但「语言会暴露换行问题」这条要留 —— 登录页的六语言文案（请输入工号与 PIN 码）
+     长度差异比列表页还大，恰恰是最该用语言切换压测的一屏。 */
+  document.getElementById('footKey').hidden = !e.paged;
+  /* 两个预览框的设计尺寸跟着入口变：管理端是 1440×900，不能按作业屏的 1920×1080 出图 */
+  const dims = `${e.w||1920}×${e.h||1080}`;
+  ['dimsA','dimsB'].forEach(id=>{ const n=document.getElementById(id); if(n) n.textContent = dims; });
+  /* 顶栏徽标也跟着入口变：作业屏是触控 1920×1080，管理端是鼠标/触控 1440×900，
+     写死「1920×1080 等比预览」会让人以为管理端字太小是压缩出来的 */
+  document.getElementById('hdrTag').textContent = e.file === 'admin.html'
+    ? '管理端 · ' + dims : dims + ' 等比预览';
+  /* 快捷键范围由入口数量派生，加页面时不用回来改这里的数字 */
+  document.getElementById('footNav').innerHTML = `<kbd>1</kbd>–<kbd>${ENTRIES.length}</kbd> 切换入口`;
+  document.title = `KDS v2 · ${e.label} · 满铺自适应原型比稿`;
+  writeHash();
+}
+
+function load(){
+  fA.src = src('a');
+  fB.src = src('b');
+  document.querySelectorAll('.ph a').forEach(a=>{
+    const th = a.closest('.pane').id.endsWith('A') ? 'a' : 'b';
+    a.href = src(th);
+  });
+  syncEntries();
+  /* 换入口可能换文件、换设计尺寸，缩放必须跟着重算 */
+  requestAnimationFrame(fit);
+}
+
+/* 把当前入口写进 URL：比稿时可以直接把「语言 + 入口」的链接发给别人 */
+function writeHash(){
+  const q = new URLSearchParams({lang:S.lang, view:S.view}).toString();
+  try { history.replaceState(null,'','#'+q); }
+  catch(err) { location.hash = q; }   // file:// 下 replaceState 可能被拦
+}
+function readHash(){
+  const h = new URLSearchParams(location.hash.slice(1));
+  const lang = h.get('lang'), view = h.get('view');
+  /* 旧深链写的是 #lang=yue（内部 key）。对外标签已统一为 zh-TW，这里做一次归一，
+     否则老链接进来语言不高亮 —— 看着像没生效。 */
+  const lg = (/^yue$/i.test(lang||'') ? 'zh-TW' : (/^zh-(tw|hant|hk)/i.test(lang||'') ? 'zh-TW' : lang));
+  if(lg && LANGS.includes(lg)) S.lang = lg;
+  if(view && ENTRIES.some(e=>e.id===view)) S.view = view;
+}
+/* 缩放基准取「当前入口的设计尺寸」，不是写死的 1920×1080 */
+function fit(){
+  const e = entry(), W = e.w || 1920, H = e.h || 1080;
+  document.querySelectorAll('.stage').forEach(st=>{
+    const f = st.querySelector('iframe');
+    f.style.width  = W + 'px';
+    f.style.height = H + 'px';
+    const k = Math.min(st.clientWidth/W, st.clientHeight/H);
+    f.style.transform = 'scale('+k+')';
+    f.style.left = ((st.clientWidth  - W*k)/2) + 'px';
+    f.style.top  = ((st.clientHeight - H*k)/2) + 'px';
+  });
+}
+const LANGS = [...document.querySelectorAll('[data-lang]')].map(b=>b.dataset.lang);
+
+/* 入口按钮由 ENTRIES 生成 —— 新增页面时这里不用动 */
+ENTRIES.forEach(e=>{
+  if(e.sep){ const s=document.createElement('span'); s.className='sep'; entryGrp.appendChild(s); }
+  const b = document.createElement('button');
+  b.dataset.view = e.id;
+  b.textContent = e.label;
+  b.title = e.label + '（' + e.id + '）';
+  b.onclick = ()=>{ S.view = e.id; load(); };
+  entryGrp.appendChild(b);
+});
+
+document.querySelectorAll('[data-lang]').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('[data-lang]').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); S.lang = b.dataset.lang; load();
+  };
+});
+
+/* 数字键 1–4 直接切入口：比稿时来回切四个入口，比点按钮快 */
+document.addEventListener('keydown', ev=>{
+  if(ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  /* 0 键 = 第 10 个入口：入口超过 9 个时，不能让最后一个没有快捷键 */
+  const i = ev.key === '0' ? 9 : Number(ev.key) - 1;
+  if(Number.isInteger(i) && i>=0 && i<ENTRIES.length){ S.view = ENTRIES[i].id; load(); }
+});
+
+/* 恢复上次入口：先按 URL 的 hash，再刷新按钮高亮 */
+readHash();
+document.querySelectorAll('[data-lang]').forEach(x=>x.classList.toggle('on', x.dataset.lang===S.lang));
+
+window.addEventListener('resize', fit);
+load();
+new ResizeObserver(fit).observe(document.querySelector('main'));
+setTimeout(fit, 60);
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Node / 前端
+node_modules/
+dist/
+build/
+
+# 运行时数据
+data/
+*.sqlite3
+*.log
+
+# coder 的 git worktree（每张卡一个）
+.worktrees/
+
+# 打包/备份文件（大二进制不入库）
+*.zip
+*.zip.bak
+*.7z
+*.tar.gz
+
+# Windows 下载残留（WSL 里常见）
+*:Zone.Identifier
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 环境变量
+.env
+.env.local

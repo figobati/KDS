@@ -1,0 +1,31 @@
+/* ==========================================================================
+   KDS 原型 v2 · theme-b.css —— 主题 B「晨光大卡片」（浅色）
+   
+   职责同 theme-a：令牌重定义 + 少量组件覆盖。
+   加载：必须在 core.css 之后。与 theme-a.css 属性选择器互斥，可同时加载。
+   无障碍：三级文字阶均 ≥ 4.9:1（text-3 原 #8794A3 在白底仅 3.09:1，已加深）。
+/* ==========================================================================
+
+/* ---------- 主题 B · 晨光大卡片 ---------- */
+[data-theme="b"]{
+  --bg-page:#EEF2F7; --bg-surface:#FFFFFF; --bg-surface-2:#F5F8FC; --bg-elev:#E9EFF7;
+  --border:#D6DFEA; --border-strong:#B7C4D4;
+  /* text-3 原 #8794A3 在白底仅 3.09:1（远低于 AA），已加深到 4.9:1 以上 */
+  --text:#111820; --text-2:#4E5A67; --text-3:#5C6875;
+  --brand:#1A6DFF; --brand-hi:#4487FF; --brand-ink:#1258CC; --on-brand:#fff;
+  --st-timeout:#D0021B; --st-warn:#A66400; --st-urge:#B26A00; --st-rush:#C43A0C;
+  --st-hold:#66707C; --st-fire:#1F5FBF; --st-gift:#6B21A8; --st-done:#237A0F;
+  --tint-timeout:#FDEBEC; --tint-warn:#FFF6E4; --tint-hold:#F1F4F8; --tint-cross:#FBDCDE;
+  --b-timeout-bg:#FDE3E3; --b-timeout-fg:#C4001A; --b-timeout-bd:#F5B5B5;
+  --b-warn-bg:#FFF0D4; --b-warn-fg:#8A5200; --b-warn-bd:#EFCF95;
+  --b-hold-bg:#EDF1F6; --b-hold-fg:#5C6773; --b-hold-bd:#D3DBE5;
+  --b-done-bg:#DFF5D6; --b-done-fg:#1F6A0C; --b-done-bd:#ACDD9B;
+  --b-gift-bg:#F2E6FB; --b-gift-fg:#6B21A8; --b-gift-bd:#D6BBEE;
+  --shadow-1:0 1px 2px rgba(16,24,40,.05), 0 8px 20px rgba(16,24,40,.06);
+  --shadow-2:0 28px 64px rgba(16,24,40,.18);
+  --warn-line:#D9A94A; --warn-dot:#F5A623; --warn-chip:#A66400;
+  --ro-warn-fg:#C4001A; --ro-warn-bg:#FFE4E6;
+  --ro-ok-fg:#1F6A0C;   --ro-ok-bg:#DFF5D6;
+  --row-line:#E7EDF5;
+}
+[data-theme="b"] .drow{background:#fff;border-color:#EEF3F9}

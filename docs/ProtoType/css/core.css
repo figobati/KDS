@@ -1,0 +1,1342 @@
+/* ==========================================================================
+   KDS 原型 v2 · core.css —— 结构与版式（与主题无关）
+   
+   职责：重置 / 布局骨架 / 顶栏 / 三视图卡片 / 登录 / 配置面板 / 分页 / 审计。
+   规则：只出现尺寸、间距、圆角、层级、状态类名等结构属性；
+         颜色一律写成 var(--token) 或 var(--token, 兜底色)，本文件不定义任何主题色。
+         :root 里那组「兜底令牌」= 主题 B 的值，作用是保证令牌缺失时
+         不会「变量未定义 → 整条声明失效 → 背景变透明」。
+   
+   依赖：无。被 theme-a.css / theme-b.css 覆盖。
+/* ==========================================================================
+
+<style>
+/* ============================================================================
+   KDS v2 — 流式满铺布局引擎
+   核心变更（对比 v1）：
+   1. 取消固定 1920×1080 画布，改用 100dvw/100dvh 全铺，任何比例屏幕零留边
+   2. 卡片 = 尺寸容器（container-type:size），内部字号全部基于 cqw/cqh
+   3. 字号取 min(cqw, cqh)，列多/行多时自动收字，永不溢出
+   4. 所有文本分三层：固定段(nowrap) / 弹性段(ellipsis) / 折叠段(+N)
+   ============================================================================ */
+:root{
+  /* 字号系数（成对：w 基于容器宽 cqw，h 基于容器高 cqh，取两者较小值）
+     注意：Chromium 的 calc() 不接受「数字×数字×长度」三连乘，故系数必须预乘好，
+     由 JS 的 applyScale() 在字号缩放变化时统一重算，CSS 侧只做「系数 × 1cqw」。 */
+  --k-table-w:6.6;   --k-table-h:11.55;  /* 桌号 */
+  --k-dish-w:5.0;    --k-dish-h:8.6;     /* 菜名 */
+  --k-qty-w:5.0;     --k-qty-h:8.5;      /* 数量 */
+  --k-time-w:4.2;    --k-time-h:7.14;    /* 计时 */
+  --k-badge-w:3.15;  --k-badge-h:5.4;    /* 徽标 */
+  --k-btn-w:4.2;                          /* 按钮 */
+  --k-tip-w:3.2;                          /* 辅助文字 */
+  --k-tip9-w:2.88;                        /* 辅助 ×0.9 */
+  --k-badge9-w:2.84;                      /* 徽标 ×0.9 */
+  --k-qty8-w:4.1;                         /* 数量 ×0.82 */
+  --k-sm-w:2.58;                          /* 小号徽标 ×0.82 */
+  --k-dish2-w:5.1;   --k-dish2-h:7.5;     /* 合菜卡菜名 */
+  --fs-scale:1;    /* 用户字号缩放（仅作读数，真实值已烘进上面的系数） */
+  --compress:1;    /* 文本压缩系数（长语言自动收紧字距） */
+  --cols:3; --rows:2;
+  --pager-h:clamp(56px,8.4vh,98px);
+  --gap:clamp(10px,1.15vw,26px);
+  --pad:clamp(12px,1.1vw,28px);
+  --radius:clamp(10px,0.85vw,18px);
+
+  /* 颜色兜底（= 主题 B）。作用：任何元素即使没命中主题选择器，
+     也不会出现「变量未定义 → 背景色整条声明失效 → 变透明」的灾难。 */
+  --bg-page:#EEF2F7; --bg-surface:#FFFFFF; --bg-surface-2:#F5F8FC; --bg-elev:#E9EFF7;
+  --border:#DBE3EE; --border-strong:#C2CFDF;
+  --text:#111820; --text-2:#55616F; --text-3:#5C6875;
+  --brand:#1A6DFF; --brand-hi:#4487FF; --brand-ink:#1258CC;
+  --st-done:#237A0F;
+  /* 告警描边/圆点/角标（原先在组件里写死日间色，夜航主题下描边会发灰，故令牌化） */
+  --warn-line:#D9A94A; --warn-dot:#F5A623; --warn-chip:#A66400;
+  /* 读数区语义块（面板内「达标/不达标」徽标） */
+  --ro-warn-fg:#C4001A; --ro-warn-bg:#FFE4E6;
+  --ro-ok-fg:#1F6A0C;   --ro-ok-bg:#DFF5D6;
+  --shadow-2:0 28px 64px rgba(16,24,40,.18);
+}
+/* 强对比：户外/强反光档 */
+[data-contrast="hi"]{
+  --bg-page:#fff; --bg-surface:#fff; --bg-surface-2:#fff; --bg-elev:#EEF2F7;
+  --border:#8D99A8; --border-strong:#54606E;
+  --text:#000; --text-2:#151B22; --text-3:#39424D;
+  --tint-timeout:#FFEBEB; --tint-warn:#FFF4DC; --tint-cross:#FFDCDC;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+body{
+  background:var(--bg-page,var(--bg-page,#DCE3EC)) /* 令牌化：#app 是 fixed 全屏，但 iframe 边缘/overscroll 会露出这一层，夜航下不能是浅色块 */;
+  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",-apple-system,"Helvetica Neue",sans-serif;
+  color:var(--text);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+}
+[dir="rtl"] body{font-family:"Segoe UI","Tahoma","Noto Naskh Arabic","PingFang SC",sans-serif}
+/* 繁体（zh-TW）走正体字形栈：不能再吃「PingFang SC / Microsoft YaHei」这套简体字形规范，
+   否则「起、骨、内」等字的笔形是大陆写法，港台用户一眼看出不对味（KDS-09 §11.5.3）。
+   Windows 用 JhengHei、macOS 用 PingFang TC、Linux/Android 用 Noto Sans TC；
+   **兜底不能落回简体字体** —— 宁可退到系统 sans-serif，也不要让正体文本被简体字形渲染。
+   选择器要写全 zh-TW / zh-Hant / zh-HK：`:lang(zh-TW)` 只匹配 tag 以它开头的串，
+   而深链接受这三种写法（内部都指向同一份繁體詞典）。 */
+html:lang(zh-TW) body, html:lang(zh-Hant) body, html:lang(zh-HK) body{
+  font-family:"PingFang TC","Microsoft JhengHei","Noto Sans TC","PingFang HK","Noto Sans HK",sans-serif;
+}
+button{font-family:inherit;color:inherit;border:0;background:none;cursor:pointer;white-space:nowrap}
+/* ================= 应用外壳：真·100% 铺满 ================= */
+#app{
+  position:fixed;inset:0;display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  background:var(--bg-page);overflow:hidden;
+}
+/* ================= 顶栏 ================= */
+.top{
+  display:flex;align-items:center;gap:clamp(8px,.75vw,18px);
+  height:clamp(58px,7.2vh,86px);padding:0 var(--pad);
+  background:var(--bg-surface);border-bottom:1px solid var(--border);
+  overflow:hidden;position:relative;z-index:5;
+}
+.brand{display:flex;flex-direction:column;justify-content:center;flex:none;min-width:0;max-width:14vw}
+.brand b{
+  font-size:clamp(15px,1.25vw,24px);font-weight:800;letter-spacing:.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.brand span{
+  font-size:clamp(10px,.66vw,13px);color:var(--text-3);letter-spacing:.08em;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.vsep{width:1px;height:60%;background:var(--border);flex:none}
+.tabs{display:flex;gap:4px;background:var(--bg-elev);padding:5px;border-radius:12px;flex:none}
+.tabs button{
+  height:clamp(38px,4.6vh,54px);padding:0 clamp(12px,1.1vw,22px);border-radius:9px;
+  font-size:clamp(13px,1.15vw,22px);font-weight:700;color:var(--text-2);
+  max-width:16vw;overflow:hidden;text-overflow:ellipsis;
+}
+.tabs button.on{background:var(--brand);color:#fff;box-shadow:0 2px 10px rgba(26,109,255,.3)}
+/* 范围开关（本工序 ⇄ 全工序＝综合屏）。
+   与模式 Tab 用同一套形状语言，但**不用品牌蓝**选中态 ——
+   两排都是蓝的会读成「四个 Tab 里选一个」，而它们是正交的两维。
+   全工序时用琥珀色：这是另一种工作状态（看全店进度），不只是换个筛选项。 */
+.scope{display:flex;gap:4px;background:var(--bg-elev);padding:5px;border-radius:12px;flex:none}
+.scope button{
+  height:clamp(38px,4.6vh,54px);padding:0 clamp(10px,.95vw,18px);border-radius:9px;
+  font-size:clamp(12px,1vw,19px);font-weight:700;color:var(--text-2);
+  max-width:17vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.scope button.on{background:var(--st-done);color:#fff}
+.scope.is-all{box-shadow:0 0 0 2px var(--st-warn)}
+.chips{display:flex;gap:clamp(5px,.45vw,10px);flex:1 1 auto;min-width:0;overflow:hidden}
+.chip{
+  height:clamp(38px,4.6vh,54px);padding:0 clamp(10px,.9vw,18px);border-radius:11px;
+  background:var(--bg-surface-2);border:1px solid var(--border);
+  display:inline-flex;align-items:center;gap:7px;flex:none;
+  font-size:clamp(12px,1vw,20px);font-weight:600;color:var(--text-2);
+}
+.chip b{font-size:clamp(12px,1vw,20px);color:var(--text)}
+.chip.on{background:rgba(61,139,255,.14);border-color:var(--brand);color:var(--brand-ink)}
+.chip.on b{color:var(--brand-ink)}
+.chip.c-timeout.on{background:rgba(208,2,27,.1);border-color:var(--st-timeout);color:var(--st-timeout)}
+.chip.c-timeout.on b{color:var(--st-timeout)}
+.top-sp{flex:1 1 0;min-width:8px}
+.search{position:relative;flex:1 1 22vw;min-width:96px;max-width:22vw}
+.search input{
+  width:100%;height:clamp(38px,4.6vh,54px);border-radius:11px;background:var(--bg-surface-2);
+  border:1px solid var(--border);color:var(--text);outline:none;
+  font-size:clamp(12px,1vw,19px);
+  /* 右内缩给 ⌨ 开关留位：不能盖住已经输入的字 */
+  padding-inline:clamp(30px,2.6vw,46px) clamp(46px,3.4vw,62px);
+  text-overflow:ellipsis;
+}
+#kbBtn{
+  position:absolute;inset-inline-end:5px;top:50%;transform:translateY(-50%);
+  width:clamp(34px,2.9vw,44px);height:clamp(34px,2.9vw,44px);border-radius:9px;
+  display:grid;place-items:center;font-size:clamp(13px,1.05vw,19px);
+  background:var(--bg-elev);border:1px solid var(--border);color:var(--text-2);
+  touch-action:manipulation;
+}
+#kbBtn:active{background:var(--bg-surface-2)}
+#kbBtn.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.search input::placeholder{color:var(--text-3);opacity:1}
+.search input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(61,139,255,.16)}
+.search .ico{
+  position:absolute;inset-inline-start:14px;top:50%;transform:translateY(-50%);
+  font-size:clamp(12px,1vw,18px);color:var(--text-3);pointer-events:none;
+}
+.who{display:flex;align-items:center;gap:9px;flex:none;font-size:clamp(12px,1vw,19px);color:var(--text-2)}
+.who .av{
+  width:clamp(30px,2.4vw,44px);height:clamp(30px,2.4vw,44px);border-radius:10px;
+  background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:800;
+  font-size:clamp(12px,.95vw,18px);
+}
+.who .nm{max-width:9vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-btn{
+  height:clamp(38px,4.6vh,54px);padding:0 clamp(10px,1vw,18px);border-radius:11px;
+  background:var(--bg-surface-2);border:1px solid var(--border);
+  font-size:clamp(12px,1vw,19px);font-weight:600;color:var(--text-2);flex:none;
+  max-width:11vw;overflow:hidden;text-overflow:ellipsis;
+}
+.clock{
+  flex:none;text-align:end;font-size:clamp(15px,1.35vw,26px);font-weight:800;letter-spacing:.01em;
+  line-height:1.05;
+}
+.clock small{
+  display:block;font-size:clamp(10.5px,.6vw,12px);font-weight:600;color:var(--text-3);
+  letter-spacing:.08em;margin-top:2px;white-space:nowrap;
+}
+/* 空间不足时逐级降级（由 JS 检测加 class） */
+#app.lv1 .who .nm,#app.lv1 .tb-btn .lbl{display:none}
+#app.lv2 .search{flex:0 0 clamp(38px,4.6vh,54px);min-width:0}
+#app.lv2 .search input{padding:0;text-indent:-999px;pointer-events:none}
+#app.lv2 .search .ico{display:none}
+/* 顶栏收到最窄一档时，整个搜索框退化成一个圆钮 —— 圆钮本身就是键盘开关。
+   原来这里 input 与图标都是 pointer-events:none，等于窄屏下搜索彻底点不动；
+   把开关铺满整格接管点击，窄屏才不至于丢功能。 */
+#app.lv2 #kbBtn{
+  inset:0;width:100%;height:100%;transform:none;border-radius:50%;
+  background:var(--bg-elev);font-size:clamp(15px,1.6vw,24px);
+}
+#app.lv3 .clock small{display:none}
+#app.lv3 .brand span{display:none}
+
+/* ============================================================================
+   触摸键盘 · 底部抽屉（顶栏搜索框专用）
+   落位理由三条：
+     1) 手距 —— 后厨屏多壁挂，屏幕下半是肘高舒适区，抽屉贴底抬臂最少；
+     2) 肌肉记忆 —— 收银机 / 平板 / 手机的输入面板都在底部，不用额外学；
+     3) 让出的代价最小 —— 盖掉的是末排卡与分页条，而搜索过程中本就不翻页；
+        顶部下拉会盖住首排，那通常正是最急的超时单。
+   面板内容限宽居中：字母页 10 列需要宽度，数字页 4 列若同宽会把键拉成扁条，
+   两页共用同一宽度还能避免切换时的横向跳动。
+   刻意不做全屏遮罩 —— 后厨要持续盯超时红，变暗等于制造监控盲区。
+   ============================================================================ */
+#kb{
+  position:absolute;left:0;right:0;bottom:0;z-index:40;
+  height:clamp(272px,36vh,392px);
+  display:flex;flex-direction:column;gap:clamp(6px,1vh,14px);
+  padding:clamp(8px,1.2vh,16px) var(--pad) var(--pad);
+  background:var(--bg-surface);
+  border-top:1px solid var(--border-strong);
+  border-radius:var(--radius) var(--radius) 0 0;
+  overflow:hidden;
+}
+#kb[hidden]{display:none}
+#kb > *{width:min(100%,clamp(560px,56vw,980px));margin-inline:auto}
+.kb-hd{flex:none;display:flex;align-items:center;gap:clamp(8px,.8vw,14px)}
+.kb-val{
+  flex:1;min-width:0;height:clamp(38px,4.8vh,56px);
+  display:flex;align-items:center;padding-inline:clamp(10px,1vw,18px);
+  border-radius:11px;background:var(--bg-surface-2);border:1px solid var(--border);
+  font-size:clamp(15px,1.25vw,26px);font-weight:800;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.kb-val .ph{font-weight:400;color:var(--text-3)}
+.kb-tab{flex:none;display:flex;gap:4px;background:var(--bg-elev);padding:4px;border-radius:11px}
+.kb-tab button{
+  min-height:36px;padding:0 clamp(8px,.8vw,16px);border-radius:8px;
+  font-size:clamp(12px,.95vw,18px);font-weight:700;color:var(--text-2);
+}
+.kb-tab button.on{background:var(--brand);color:#fff}
+.kb-x{
+  flex:none;width:clamp(38px,4.8vh,56px);height:clamp(38px,4.8vh,56px);border-radius:11px;
+  background:var(--bg-elev);border:1px solid var(--border);
+  font-size:clamp(16px,1.5vw,26px);color:var(--text-2);
+}
+.kb-hit{
+  flex:none;min-height:clamp(36px,4.4vh,52px);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;overflow:hidden;padding-block:2px;
+}
+.kb-hit b{flex:none;font-size:clamp(12px,.95vw,19px);font-weight:700;color:var(--text-2)}
+.kb-hit button{
+  height:clamp(32px,4vh,46px);padding:0 clamp(8px,.8vw,14px);border-radius:9px;
+  background:color-mix(in srgb,var(--brand) 12%,transparent);
+  border:1px solid var(--brand);color:var(--brand-ink);
+  font-size:clamp(12px,.95vw,18px);font-weight:700;
+}
+.kb-hit .none{font-size:clamp(12px,.95vw,18px);color:var(--text-3)}
+.kb-keys{flex:1;min-height:0;display:grid;gap:clamp(5px,.7vh,10px)}
+.kb-keys.hide{display:none}
+.kb-k{
+  min-width:0;min-height:0;border-radius:11px;
+  background:var(--bg-surface-2);border:1px solid var(--border);
+  font-size:clamp(17px,1.8vw,34px);font-weight:700;color:var(--text);
+  touch-action:manipulation;
+}
+.kb-k:active{background:var(--bg-elev);transform:scale(.97)}
+.kb-k.fn{font-size:clamp(12px,1.05vw,20px);color:var(--text-2);background:var(--bg-elev)}
+.kb-k.sp{font-size:clamp(12px,1.05vw,20px)}
+.kb-k.go{
+  background:var(--brand);border-color:var(--brand);color:#fff;
+  font-size:clamp(12px,1.05vw,20px);font-weight:800;
+}
+/* 数字页 4×3：比 3×4 少一行，同样面板高度能换出更高的键（3×4 时键高会掉到 53px 以下、宽却超过 300px） */
+#pageNum{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr))}
+/* 字母页 10×4 */
+#pageAbc{grid-template-columns:repeat(10,minmax(0,1fr));grid-template-rows:repeat(4,minmax(0,1fr))}
+/* 末行两个宽键：空格 6 : 确认 4，凑满 10 列，不留半格空洞 */
+#pageAbc > .sp{grid-column:span 6}
+#pageAbc > .go{grid-column:span 4}
+
+/* 矮屏（1366×768、竖向壁挂）：先压抽屉自身留白，再压命中条，
+   保住「键最短边 ≥48px」—— 后厨戴手套、手上有油，键小一寸就是误触翻倍。 */
+@media (max-height:860px){
+  #kb{height:clamp(252px,40vh,320px);gap:6px;padding:8px var(--pad) 10px}
+  .kb-val{height:38px;font-size:16px}
+  .kb-tab button{min-height:32px;font-size:13px}
+  .kb-x{width:38px;height:38px}
+  .kb-hit{min-height:34px}
+  .kb-hit button{height:32px;font-size:13px}
+  .kb-keys{gap:5px}
+}
+/* 抽屉升起时：顶栏搜索框保持高亮，让人始终知道「我在给谁打字」 */
+#app.kb-open .search input{border-color:var(--brand);box-shadow:0 0 0 3px rgba(61,139,255,.16)}
+/* 命中反馈：命中的描边强调，没命中的原地淡出。
+   四个视图的卡片类名不同（桌台 .tcard / 合菜 .mcard / 单菜 .scard / 综合 .ccard），
+   但键盘是同一个组件，所以这里一次性覆盖 —— 搜一次就能在四种模式里都用。 */
+#app.kb-open .tcard.kb-off,#app.kb-open .mcard.kb-off,
+#app.kb-open .scard.kb-off,#app.kb-open .ccard.kb-off{opacity:.2;filter:saturate(.45)}
+#app.kb-open .tcard.kb-on,#app.kb-open .mcard.kb-on,
+#app.kb-open .scard.kb-on,#app.kb-open .ccard.kb-on{
+  border-color:var(--brand);box-shadow:0 0 0 3px rgba(26,109,255,.26)
+}
+/* ================= 内容区 ================= */
+.body{min-height:0;overflow:hidden;display:flex;padding:var(--pad);gap:var(--gap)}
+.grid{
+  flex:1;min-width:0;min-height:0;display:grid;gap:var(--gap);
+  grid-template-columns:repeat(var(--cols),minmax(0,1fr));
+  grid-template-rows:repeat(var(--rows),minmax(0,1fr));
+}
+/* ================= 桌台卡片（尺寸容器） ================= */
+.tcard{
+  container-type:size;container-name:card;
+  position:relative;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:var(--shadow-1);
+  transition:transform .16s ease,box-shadow .16s ease;
+}
+.tcard.tone-timeout{background:var(--tint-timeout);border-color:var(--st-timeout)}
+.tcard.tone-warn{background:var(--tint-warn);border-color:var(--warn-line,#D9A94A)}
+.tcard.tone-cross{background:var(--tint-cross);border-color:var(--st-timeout);border-width:2px}
+.tcard.tone-hold{background:var(--tint-hold);border-color:var(--border-strong)}
+.tcard.sel{border-color:var(--brand);box-shadow:0 0 0 3px rgba(26,109,255,.28),var(--shadow-1)}
+.tcard.gone{animation:out .4s ease forwards}
+@keyframes out{to{opacity:0;transform:scale(.93)}}
+.tcard.press{transform:scale(.985)}
+/* 卡头 —— 高度用 cqh 跟随卡片实高，行数变多时自动矮 */
+.chd{
+  flex:none;height:clamp(34px,17cqh,78px);
+  display:flex;align-items:center;gap:clamp(6px,.6cqw,14px);
+  padding-inline:clamp(8px,.8cqw,18px);
+  border-bottom:1px solid var(--row-line);
+}
+.cdot{
+  width:clamp(8px,.75cqw,15px);height:clamp(8px,.75cqw,15px);border-radius:50%;
+  background:var(--text-3);flex:none;
+}
+.cdot.c-timeout{background:var(--st-timeout);box-shadow:0 0 0 3px rgba(208,2,27,.18);animation:blink 1.1s infinite}
+.cdot.c-warn{background:var(--warn-dot,#F5A623);box-shadow:0 0 0 3px rgba(245,166,35,.2)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.ccnt{
+  font-size:clamp(11px,calc(var(--k-sm-w)*1cqw),21px);
+  font-weight:700;color:var(--text-2);white-space:nowrap;flex:none;
+}
+.cbadges{display:flex;gap:4px;flex:1;min-width:0;overflow:hidden}
+.ctno{
+  flex:none;max-width:58%;display:inline-flex;align-items:center;
+  height:clamp(26px,14cqh,60px);padding-inline:clamp(8px,.75cqw,18px);
+  border-radius:clamp(6px,.55cqw,12px);
+  background:var(--brand);color:#fff;font-weight:800;line-height:1;
+  white-space:nowrap;letter-spacing:-.01em;overflow:hidden;
+  /* 关键：桌号字号按字符数收敛，≤7 字符满号，更长才按比例收字，永不换行 */
+  font-size:clamp(11px,calc(min(var(--k-table-w)*1cqw,var(--k-table-h)*1cqh) * var(--tn-f,1)),48px);
+  box-shadow:0 3px 12px rgba(26,109,255,.25);
+}
+.tcard.tone-timeout .ctno{background:var(--st-timeout);box-shadow:none}
+.tcard.tone-warn .ctno{background:var(--warn-chip,#A66400);box-shadow:none}
+.tcard.tone-hold .ctno{background:var(--st-hold);box-shadow:none}
+/* 卡身 */
+.cbd{
+  flex:1;min-height:0;display:flex;flex-direction:column;
+  /* 菜品少时行高会顶到 max-height，剩余空间上下均分，避免底部一条突兀空白 */
+  justify-content:center;
+  padding:clamp(4px,.45cqw,10px) clamp(5px,.5cqw,12px);
+  gap:clamp(3px,.35cqh,8px);overflow:hidden;
+}
+.drow{
+  position:relative;flex:1 1 0;min-height:0;max-height:clamp(72px,27cqh,132px);
+  display:flex;align-items:center;
+  border-radius:calc(var(--radius)*.55);
+  padding-inline:clamp(8px,.85cqw,16px) clamp(6px,.55cqw,12px);
+  gap:clamp(6px,.6cqw,14px);
+  background:var(--bg-surface);border:1px solid transparent;
+  transition:background .14s,opacity .18s;
+}
+/* 两行菜名模式：行高上调，给第二行留出空间 */
+#app.lines2 .drow{max-height:clamp(96px,34cqh,158px)}
+#app.lines2 .rline2{display:none}
+.drow:active{outline:2px solid var(--brand);background:var(--bg-surface-2)}
+.drow::before{
+  content:"";position:absolute;inset-inline-start:0;top:14%;bottom:14%;
+  width:clamp(3px,.35cqw,6px);border-radius:3px;background:transparent;
+}
+.drow.t-timeout::before{background:var(--st-timeout)}
+.drow.t-warn::before{background:var(--warn-dot,#F5A623)}
+.drow.t-rush::before{background:var(--st-rush)}
+.drow.t-hold{opacity:.66}
+.drow.t-cancel{opacity:.6}
+.drow.t-cancel .rname{text-decoration:line-through;text-decoration-color:var(--st-timeout);text-decoration-thickness:2px}
+.drow.done{opacity:.34}
+.drow.done .rname{text-decoration:line-through}
+.drow.err{animation:shake .5s}
+@keyframes shake{0%,100%{background:var(--bg-surface)}25%,65%{background:#FDECEC}}
+/* 文本三层的落地：弹性段 / 固定段 */
+.rmain{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rline1{display:flex;align-items:center;gap:clamp(4px,.4cqw,9px);min-width:0}
+.rname{
+  flex:0 1 auto;min-width:0;color:var(--text);
+  font-size:clamp(11px,calc(min(var(--k-dish-w)*1cqw,var(--k-dish-h)*1cqh)),40px);
+  font-weight:600;line-height:1.15;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.rname.two{
+  white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  line-height:1.12;
+}
+.rline2{
+  font-size:clamp(10.5px,calc(var(--k-tip-w)*1cqw),18px);
+  color:var(--text-3);line-height:1.1;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* 菜行的档口胶囊（只在全工序时出现）。
+   给一个专属底色而不是复用做法文字的灰色：一桌的菜横跨四五个档口时，
+   师傅是「扫颜色找档口」，不是逐行读字 —— 灰色正文撑不起这个扫读动作。 */
+.dst{
+  flex:none;max-width:42%;
+  font-size:clamp(9.5px,calc(var(--k-tip-w)*1cqw),16px);font-weight:700;
+  padding:1px clamp(4px,.35cqw,8px);border-radius:5px;
+  background:var(--bg-elev);border:1px solid var(--border-strong);color:var(--text-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.rright{
+  flex:none;text-align:end;display:flex;flex-direction:column;align-items:flex-end;
+  justify-content:center;gap:1px;white-space:nowrap;
+}
+.rqty{
+  font-size:clamp(11px,calc(min(var(--k-qty-w)*1cqw,var(--k-qty-h)*1cqh)),40px);
+  font-weight:800;line-height:1;
+}
+.rqty::after{
+  content:attr(data-unit);font-size:.56em;font-weight:600;color:var(--text-3);
+  margin-inline-start:2px;letter-spacing:0;
+}
+.rwait{
+  font-size:clamp(10.5px,calc(var(--k-tip9-w)*1cqw),19px);
+  color:var(--text-3);margin-top:2px;line-height:1;
+}
+.drow.t-timeout .rwait{color:var(--st-timeout);font-weight:800}
+.drow.t-warn .rwait{color:var(--st-warn);font-weight:800}
+/* 「+N 道」是**入口**不是提示：不点开，剩下的菜厨师永远看不到。
+   所以给它可点的样子（虚线框 + 向下箭头 + 按下反色），并抬到 28px 以上。
+   仍然够不到 44px 触摸标准 —— 但整块卡身空白也是展开热区（见 app.html 的 bdEl.onclick），
+   实际可点面积远大于这一条。真要严格达标只能牺牲一道菜的行高，不划算。 */
+.more{
+  flex:none;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:clamp(11px,calc(var(--k-tip-w)*1cqw),18px);
+  color:var(--text-2);font-weight:700;
+  height:clamp(28px,7cqh,40px);
+  cursor:pointer;user-select:none;
+  border:1px dashed var(--border-strong);border-radius:var(--radius-sm,6px);
+  background:var(--bg-surface-2);
+  transition:background .14s ease,color .14s ease;
+}
+.more::after{
+  content:'';flex:none;width:0;height:0;
+  border-inline:4px solid transparent;border-top:5px solid currentColor;
+}
+.more:hover{border-color:var(--brand);color:var(--brand)}
+.more:active{background:var(--brand);border-color:var(--brand);color:#fff}
+/* 展开态：铺全部行。二三十道的大单（宴席 / 包厢）单列铺下去一屏装不完 ——
+   实测 28 道菜在 1920 下要滚 1315px，26 行照样看不见，等于白展开。
+   所以改**多列网格**：列数由 expandCard() 按可用高度算出来（1~4 列）。
+   列优先填充（grid-auto-flow:column）：第 1 列是前 R 道、第 2 列接下去，
+   竖着读的顺序才跟下单顺序一致；横着排会把「1 2 3」读成一行。 */
+.cbd.all{
+  display:grid;align-content:start;
+  grid-template-columns:repeat(var(--exp-cols,1),minmax(0,1fr));
+  grid-template-rows:repeat(var(--exp-rows,auto),auto);
+  grid-auto-flow:column;
+  gap:8px 10px;
+  overflow-y:auto;overscroll-behavior:contain;
+}
+/* 列数用尽还装不下（超大单 + 小屏）才滚。这时必须给**视觉提示**：
+   不给的话厨师不知道下面还有菜 —— 那跟折叠成「+N 道」一样糟。
+   底部渐变 + 下箭头，滚到底自动撤掉（.at-end 由 scroll 监听切换）。 */
+.expcard.scrollable .cbd.all{
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 34px),transparent 100%);
+          mask-image:linear-gradient(to bottom,#000 calc(100% - 34px),transparent 100%);
+}
+.expcard.scrollable.at-end .cbd.all{-webkit-mask-image:none;mask-image:none}
+.expcard.scrollable::after{
+  content:'⌄';position:absolute;left:50%;bottom:4px;transform:translateX(-50%);
+  font-size:18px;line-height:1;color:var(--text-2);opacity:.75;
+  pointer-events:none;transition:opacity .15s ease;
+}
+.expcard.scrollable.at-end::after{opacity:0}
+
+/* 展开态的行高 / 字号必须**脱离浮层自身高度**。
+   原卡的行高写的是 cqh（容器查询高度），到了展开态就陷进恶性循环：
+   浮层越矮 → cqh 越小 → 字号越小、行越矮 → 越「装得下」→ 收敛在一个矮胖的
+   不动点上。实测 28 道菜被压成 374px 高（每行 10px），字小得根本没法看。
+   所以展开态改用 vw / vh 驱动 —— 跟视口走，不跟自己走。 */
+.expcard .drow{
+  flex:none;max-height:none;
+  min-height:clamp(40px,4.4vh,56px);
+}
+#app.lines2 .expcard .drow{min-height:clamp(56px,6vh,76px);max-height:none}
+.expcard .rname{font-size:clamp(15px,1.25vw,26px)}
+.expcard .rqty {font-size:clamp(15px,1.3vw,26px)}
+
+/* ---- 卡内展开浮层 ---- */
+.scrim{
+  position:fixed;inset:0;z-index:60;background:rgba(8,12,18,.44);
+  opacity:0;transition:opacity .18s ease;
+}
+.scrim.on{opacity:1}
+.expcard{
+  position:fixed;z-index:61;overflow:hidden;
+  border-radius:var(--radius);
+  box-shadow:0 18px 48px rgba(0,0,0,.30);
+  transition:left .2s ease,top .2s ease,width .2s ease,height .2s ease,box-shadow .2s ease;
+}
+.expcard .tcard{
+  width:100%;height:100%;box-shadow:none;
+  border:2px solid var(--brand);border-radius:var(--radius);
+}
+/* 卡尾 */
+.cft{
+  /* 下限 48px 由触摸标准锁定：宁可少显示一道菜，也不压缩触点 */
+  flex:none;height:clamp(48px,21.5cqh,86px);
+  display:flex;align-items:center;gap:clamp(5px,.5cqw,12px);
+  padding-inline:clamp(8px,.8cqw,16px);
+  border-top:1px solid var(--row-line);background:var(--bg-surface-2);
+}
+.cwait{
+  font-size:clamp(11px,calc(min(var(--k-time-w)*1cqw,var(--k-time-h)*1cqh)),30px);
+  font-weight:800;white-space:nowrap;flex:none;
+}
+.cwait.timeout{color:var(--st-timeout)}
+.cwait.warn{color:var(--st-warn)}
+.cacts{margin-inline-start:auto;display:flex;gap:clamp(4px,.45cqw,11px);min-width:0}
+.btn{
+  height:clamp(48px,17.5cqh,58px);max-height:100%;
+  padding:0 clamp(8px,.85cqw,20px);
+  border-radius:calc(var(--radius)*.55);
+  font-size:clamp(11px,calc(var(--k-btn-w)*1cqw),26px);
+  font-weight:700;flex:none;overflow:hidden;text-overflow:ellipsis;
+  transition:transform .1s,background .12s;
+}
+.btn:active{transform:scale(.97)}
+.btn-ghost{background:var(--bg-surface);color:var(--text);border:1.5px solid var(--border-strong)}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:0 3px 12px rgba(26,109,255,.28)}
+/* 徽标 */
+.badge{
+  display:inline-flex;align-items:center;justify-content:center;flex:none;
+  height:clamp(16px,5.6cqh,32px);padding:0 clamp(5px,.5cqw,13px);
+  border-radius:999px;
+  font-size:clamp(11px,calc(min(var(--k-badge-w)*1cqw,var(--k-badge-h)*1cqh)),20px);
+  font-weight:800;letter-spacing:.01em;white-space:nowrap;
+  border:1px solid transparent;
+}
+.badge.dot{padding:0;width:clamp(16px,5.6cqh,32px)}
+.b-timeout{background:var(--b-timeout-bg);color:var(--b-timeout-fg);border-color:var(--b-timeout-bd)}
+.b-warn{background:var(--b-warn-bg);color:var(--b-warn-fg);border-color:var(--b-warn-bd)}
+.b-hold{background:var(--b-hold-bg);color:var(--b-hold-fg);border-color:var(--b-hold-bd)}
+.b-done{background:var(--b-done-bg);color:var(--b-done-fg);border-color:var(--b-done-bd)}
+.b-gift{background:var(--b-gift-bg);color:var(--b-gift-fg);border-color:var(--b-gift-bd)}
+.b-brand{background:rgba(26,109,255,.12);color:var(--brand-ink);border-color:rgba(26,109,255,.35)}
+.b-fire{background:rgba(31,95,191,.12);color:var(--st-fire);border-color:rgba(31,95,191,.3)}
+.b-solid{background:var(--st-timeout);color:#fff;border-color:transparent}
+.b-urge{background:var(--b-warn-bg);color:var(--b-warn-fg);border-color:var(--b-warn-bd);animation:blink 1.2s infinite}
+/* ================= 分页条 ================= */
+.pager{
+  display:flex;align-items:center;gap:clamp(8px,.8vw,24px);
+  height:var(--pager-h);padding:0 var(--pad);
+  background:var(--bg-surface);border-top:1px solid var(--border);
+}
+.pg-btn{
+  display:inline-flex;align-items:center;gap:clamp(6px,.55vw,14px);
+  height:clamp(38px,5.9vh,68px);min-width:clamp(96px,11vw,220px);
+  padding:0 clamp(10px,1.3vw,28px);border-radius:11px;
+  background:var(--bg-surface-2);border:1.5px solid var(--border-strong);
+  font-size:clamp(12px,1.15vw,25px);font-weight:700;color:var(--text);
+  justify-content:center;
+}
+.pg-btn:hover{border-color:var(--brand);color:var(--brand-ink)}
+.pg-btn:disabled{opacity:.3;pointer-events:none}
+.pg-btn .ar{font-size:.85em;transition:transform .2s}
+[dir="rtl"] .pg-btn .ar{transform:scaleX(-1)}
+.pg-mid{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  gap:clamp(8px,1.4vw,30px);font-size:clamp(11px,1vw,22px);color:var(--text-2);
+  min-width:0;overflow:hidden;white-space:nowrap;
+}
+.pg-num{font-size:clamp(13px,1.25vw,28px);font-weight:800;color:var(--text);flex:none}
+.pg-info{
+  flex:none;font-size:clamp(10px,.85vw,19px);color:var(--text-3);
+  max-width:26vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pg-dots{display:flex;gap:6px;flex:none}
+.pg-dots i{width:clamp(6px,.5vw,10px);height:clamp(6px,.5vw,10px);border-radius:50%;background:var(--border-strong)}
+.pg-dots i.on{background:var(--brand);width:clamp(16px,1.6vw,30px);border-radius:5px}
+/* ================= 合菜视图 ================= */
+.merge{flex:1;min-width:0;display:flex;gap:var(--gap);min-height:0}
+.merge-l{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+/* 视图切换与状态筛选统一由顶栏承担，合菜视图内不再重复一行筛选条 */
+.mgrid{
+  flex:1;min-height:0;display:grid;gap:clamp(5px,.55vw,14px);
+  /* 与桌台/单菜共用同一套行列令牌，面板里调一次三处都跟 */
+  grid-template-columns:repeat(var(--cols),minmax(0,1fr));
+  grid-template-rows:repeat(var(--rows),minmax(0,1fr));
+}
+.mcard{
+  container-type:size;position:relative;overflow:hidden;
+  background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:clamp(6px,.7cqw,16px);display:flex;flex-direction:column;box-shadow:var(--shadow-1);
+}
+.mcard.t-timeout{background:var(--tint-timeout);border-color:var(--st-timeout)}
+.mcard.t-warn{background:var(--tint-warn);border-color:var(--warn-line,#D9A94A)}
+.mcard.sel{border-color:var(--brand);box-shadow:0 0 0 3px rgba(26,109,255,.26)}
+.mcorner{
+  position:absolute;inset-inline-start:0;top:0;
+  height:clamp(18px,13cqh,40px);padding:0 clamp(6px,.8cqw,16px);
+  border-end-end-radius:14px;display:grid;place-items:center;
+  font-size:clamp(10.5px,calc(var(--k-badge9-w)*1cqw),19px);font-weight:800;color:#fff;
+}
+.mcorner.timeout{background:var(--st-timeout)}
+.mcorner.warn{background:var(--warn-chip,#A66400)}
+.mcorner.hold{background:var(--st-hold)}
+.mqty{
+  position:absolute;inset-inline-end:clamp(5px,.6cqw,12px);top:clamp(5px,.6cqw,12px);
+  min-width:clamp(24px,4.4cqw,64px);height:clamp(20px,11cqh,46px);padding:0 clamp(4px,.5cqw,12px);
+  border-radius:9px;background:var(--b-warn-bg);border:1.5px solid var(--warn-dot,#F5A623);color:var(--b-warn-fg);
+  display:grid;place-items:center;
+  font-size:clamp(11px,calc(var(--k-qty8-w)*1cqw),26px);font-weight:800;
+}
+.mqty::after{content:attr(data-unit);font-size:.55em;margin-inline-start:2px}
+/* 菜名一律从顶上写起：横向一排卡片，名字的起始 y 必须完全对齐。
+   以前用 margin-block:auto 垂直居中，卡里有几行做法、菜名占一行还是两行，
+   名字就被顶到不同高度，一眼扫过去是"锯齿状"的。
+   顶部预留一条 clamp 高度，让开绝对定位的角标（状态角标 + 数量角标）——
+   所有卡都留，不管有没有角标，否则有角标的卡又会被压下去。 */
+.mname{
+  margin-block:clamp(17px,14.5cqh,44px) 0;
+  font-size:clamp(11px,calc(min(var(--k-dish2-w)*1cqw,var(--k-dish2-h)*1cqh)),30px);
+  font-weight:700;line-height:1.16;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.mtags{margin-top:clamp(4px,3cqh,10px);display:flex;gap:4px;overflow:hidden;max-height:26%}
+.mtag{
+  font-size:clamp(11px,calc(var(--k-tip9-w)*1cqw),16px);padding:2px 7px;border-radius:6px;
+  background:var(--bg-elev);color:var(--text-2);font-weight:600;white-space:nowrap;flex:none;
+}
+/* 合菜卡的「档口 + 最长等待」（只在全工序时出现）。
+   走正常流 + margin-top:auto 贴卡底 —— 绝对定位会和右下角的勾选框、右上角的份数打架。 */
+.mfoot{
+  margin-top:auto;padding-top:clamp(3px,2.2cqh,10px);
+  display:flex;align-items:baseline;gap:clamp(4px,.5cqw,9px);min-width:0;overflow:hidden;
+}
+.mst{
+  flex:none;font-size:clamp(11px,calc(var(--k-tip9-w)*1cqw),16px);padding:2px 7px;border-radius:6px;
+  background:var(--bg-elev);border:1px solid var(--border);
+  color:var(--text-2);font-weight:700;white-space:nowrap;max-width:52%;
+  overflow:hidden;text-overflow:ellipsis;
+}
+/* 综合屏是看进度的屏 —— 聚合到一道菜上没有时间，就看不出哪道最拖 */
+.mwait{
+  flex:none;font-size:clamp(10px,calc(var(--k-tip9-w)*1cqw),15px);color:var(--text-3);font-weight:600;
+}
+.mwait-v{
+  flex:none;font-size:clamp(12px,calc(var(--k-badge-w)*1cqw),22px);color:var(--text);font-weight:800;
+}
+.mcheck{
+  position:absolute;inset-inline-end:clamp(6px,.7cqw,14px);bottom:clamp(6px,.7cqw,14px);
+  width:clamp(20px,4.2cqw,42px);height:clamp(20px,4.2cqw,42px);border-radius:50%;
+  background:var(--st-done);display:none;place-items:center;color:#fff;font-weight:800;
+  font-size:clamp(11px,calc(var(--k-badge-w)*1cqw),22px);
+}
+.mcard.sel .mcheck{display:grid}
+.merge-r{
+  flex:none;width:clamp(240px,21.5vw,430px);display:flex;flex-direction:column;
+  background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);
+  overflow:hidden;box-shadow:var(--shadow-1);min-height:0;
+}
+.mr-hd{
+  flex:none;height:clamp(38px,6.2vh,66px);display:flex;align-items:center;gap:8px;
+  padding-inline:clamp(8px,1vw,16px);border-bottom:1px solid var(--border);min-width:0;
+}
+.mr-hd .tip{font-size:clamp(10px,.85vw,18px);color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mr-hd .cnt{margin-inline-start:auto;font-size:clamp(12px,1vw,20px);font-weight:800;flex:none;color:var(--brand-ink)}
+.mr-list{flex:1;min-height:0;overflow:hidden;position:relative}
+.mr-act{
+  flex:none;height:clamp(48px,8vh,92px);display:flex;gap:8px;align-items:center;
+  padding:0 clamp(6px,.8vw,14px);border-top:1px solid var(--border);background:var(--bg-surface-2);
+}
+.mr-act .btn{flex:1;min-width:0;height:70%;font-size:clamp(11px,1vw,22px);padding:0 4px}
+.mr-act .btn-primary{background:var(--bg-surface);border:1.5px solid var(--brand);color:var(--brand-ink);box-shadow:none}
+.ditem{
+  display:flex;align-items:center;gap:clamp(6px,.7vw,12px);
+  min-height:clamp(38px,7.2vh,76px);padding:clamp(4px,.5vh,10px) clamp(6px,.9vw,14px);
+  border-bottom:1px solid var(--row-line);min-width:0;
+}
+.ditem.sel{background:rgba(26,109,255,.08)}
+.dcheck{
+  width:clamp(18px,2.4vh,34px);height:clamp(18px,2.4vh,34px);border-radius:50%;
+  border:2px solid var(--border-strong);flex:none;display:grid;place-items:center;
+  font-size:clamp(11px,1.6vh,19px);color:transparent;background:var(--bg-surface);
+}
+.ditem.sel .dcheck{background:var(--brand);border-color:var(--brand);color:#fff}
+.dmain{flex:1;min-width:0}
+.dl1{display:flex;align-items:center;gap:6px;min-width:0}
+.dtable{
+  font-size:clamp(12px,1.9vh,24px);font-weight:800;flex:none;white-space:nowrap;
+  max-width:45%;overflow:hidden;text-overflow:ellipsis;
+}
+.dstage{
+  font-size:clamp(11px,1.2vh,15px);padding:1px 6px;border-radius:5px;
+  background:var(--bg-elev);color:var(--text-2);font-weight:800;flex:none;white-space:nowrap;
+}
+.dname{
+  font-size:clamp(11px,1.7vh,21px);color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.dwait{font-size:clamp(10.5px,1.45vh,18px);color:var(--text-3);flex:none;margin-inline-start:auto;white-space:nowrap}
+.dwait.timeout{color:var(--st-timeout);font-weight:800}
+.dkick{
+  flex:none;width:clamp(38px,4.4vw,66px);height:clamp(30px,5.2vh,58px);border-radius:10px;
+  background:var(--brand);color:#fff;font-size:clamp(10.5px,1.35vh,17px);font-weight:800;
+  display:grid;place-items:center;text-align:center;line-height:1.05;padding:0 2px;overflow:hidden;
+}
+.dkick:disabled{background:var(--bg-elev);color:var(--text-3)}
+/* ================= 单菜视图 · 小卡片 =================
+   一张卡 = 一道菜 × 一个桌号；点卡即划单，再点撤销。
+   卡内字号全部由容器查询驱动（cqw / cqh），行列一变字号跟着变，
+   小到 8 列 × 5 行也能一屏塞下且不换行。 */
+.single{
+  flex:1;min-width:0;min-height:0;display:grid;
+  grid-template-columns:repeat(var(--cols),minmax(0,1fr));
+  grid-template-rows:repeat(var(--rows),minmax(0,1fr));
+  gap:clamp(5px,.55vw,14px);
+}
+.scard{
+  container-type:size;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;min-width:0;min-height:0;
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:clamp(7px,.72vw,14px);box-shadow:var(--shadow-1);
+  transition:transform .1s ease,opacity .18s ease,box-shadow .14s ease;
+  cursor:pointer;
+}
+.scard:active{transform:scale(.984)}
+.scard.t-timeout{background:var(--tint-timeout);border-color:var(--st-timeout)}
+.scard.t-warn{background:var(--tint-warn);border-color:var(--warn-line,#D9A94A)}
+.scard.t-hold{background:var(--tint-hold);border-color:var(--border-strong)}
+/* 左侧状态条：inset-inline-start 自动镜像，RTL 不用第二套样式 */
+.scard::before{
+  content:"";position:absolute;inset-inline-start:0;top:0;bottom:0;
+  width:clamp(3px,.34vw,7px);background:transparent;
+}
+.scard.t-timeout::before{background:var(--st-timeout)}
+.scard.t-warn::before{background:var(--warn-line,#D9A94A)}
+.scard.t-hold::before{background:var(--st-hold)}
+.scard.done{opacity:.36}
+.scard.done .sdname{text-decoration:line-through;text-decoration-thickness:2px}
+/* 卡身 */
+/* 卡身一律顶对齐（不是垂直居中）：一排卡里菜的叫法长短不一，
+   居中会让菜名的起始 y 各不相同，扫视时眼睛要上下找，非常乱。
+   底栏 .sft 是 flex:none 且贴底，所以顶对齐后多出来的空间只落在菜名下方。 */
+.sbody{
+  flex:1 1 auto;min-height:0;display:flex;flex-direction:column;
+  justify-content:flex-start;gap:clamp(1px,.35cqh,6px);
+  padding-block:clamp(4px,4.4cqh,14px) clamp(2px,2cqh,8px);
+  padding-inline:calc(clamp(6px,.75cqw,15px) + clamp(3px,.34vw,7px)) clamp(6px,.75cqw,15px);
+}
+/* 顶栏行高写死成和徽标同一套 clamp：有徽标的卡和没徽标的卡首行等高，
+   否则菜名会差 2–3px —— 一排卡扫过去就是参差不齐。 */
+.srow1{display:flex;align-items:center;gap:clamp(3px,.35cqw,8px);flex:none;min-width:0;
+  min-height:clamp(16px,5.6cqh,32px)}
+.sno{
+  flex:0 1 auto;min-width:0;font-weight:800;letter-spacing:.01em;color:var(--text-2);
+  font-size:clamp(10.5px,calc(min(var(--k-sno-w)*1cqw,var(--k-sno-h)*1cqh)),26px);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sflags{
+  display:flex;gap:3px;flex:none;margin-inline-start:auto;
+  max-width:64%;overflow:hidden;justify-content:flex-end;
+}
+.sdname{
+  flex:0 0 auto;margin-top:clamp(1px,.4cqh,5px);
+  font-size:clamp(11px,calc(min(var(--k-sdish-w)*1cqw,var(--k-sdish-h)*1cqh)),40px);
+  font-weight:700;line-height:1.14;color:var(--text);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;word-break:break-word;overflow-wrap:anywhere;
+}
+.sway{
+  flex:none;
+  font-size:clamp(10px,calc(min(var(--k-sway-w)*1cqw,var(--k-sway-h)*1cqh)),20px);
+  color:var(--text-2);line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* 卡尾：等待时长 + 数量 —— 呼应参考稿的「时间在左、数量在右」 */
+.sft{
+  flex:none;display:flex;align-items:center;gap:clamp(3px,.4cqw,8px);
+  height:clamp(26px,17.5cqh,60px);
+  padding-inline:calc(clamp(6px,.75cqw,15px) + clamp(3px,.34vw,7px)) clamp(6px,.75cqw,15px);
+  background:var(--bg-surface-2);border-top:1px solid var(--row-line);
+}
+.scard.t-timeout .sft{background:rgba(208,2,27,.09)}
+.scard.t-warn .sft{background:rgba(245,166,35,.12)}
+.swait{
+  min-width:0;flex:0 1 auto;font-weight:800;color:var(--text-2);
+  font-size:clamp(10.5px,calc(min(var(--k-swait-w)*1cqw,var(--k-swait-h)*1cqh)),24px);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.scard.t-timeout .swait{color:var(--st-timeout)}
+.scard.t-warn .swait{color:var(--st-warn)}
+.sqty{
+  flex:none;margin-inline-start:auto;font-weight:800;line-height:1;
+  color:var(--brand-ink);
+  font-size:clamp(12px,calc(min(var(--k-sqty-w)*1cqw,var(--k-sqty-h)*1cqh)),34px);
+}
+.scard.t-timeout .sqty{color:var(--st-timeout)}
+.scard.t-warn .sqty{color:var(--st-warn)}
+.sqty::after{content:attr(data-unit);font-size:.54em;font-weight:700;color:var(--text-3);margin-inline-start:2px}
+.scard.t-timeout .sqty::after{color:var(--st-timeout);opacity:.8}
+/* 划单确认 */
+.sdone{
+  position:absolute;inset-inline-end:clamp(5px,.6cqw,12px);top:clamp(5px,.8cqh,12px);
+  width:clamp(16px,4.8cqw,34px);height:clamp(16px,4.8cqw,34px);border-radius:50%;
+  background:var(--st-done);color:#fff;display:none;place-items:center;
+  font-size:clamp(9px,calc(var(--k-sdone-w)*1cqw),18px);font-weight:800;z-index:2;
+}
+.scard.done .sdone{display:grid}
+/* ================= 登录 =================
+   登录同样要「铺满」：现场是触屏，屏中央搁一块小卡 + 旁边小键盘，
+   既浪费可视面积，键也只有 32px 高，戴手套 / 手湿根本按不准。
+   改成两栏满铺 —— 左：工号 / PIN / 登录；右：3×4 数字键盘，键高按格子自动铺满。
+   字号跟卡片体系保持一致，走容器查询（container-type:size），卡变大字就变大。 */
+.login{
+  flex:1;min-width:0;min-height:0;
+  display:grid;place-items:center;
+  padding:clamp(14px,2.6vh,48px) clamp(14px,3.2vw,76px);
+  /* 背景铺满整个可用区：一层品牌柔光压在页面底色上。
+     不留任何「这不是有意背景」的空白 —— 控件一居中，四周就会露出来，
+     露出来的地方必须先有交代，否则看着像没做完。 */
+  background:
+    radial-gradient(112% 88% at 50% 36%, color-mix(in srgb, var(--brand) 9%, transparent), transparent 64%),
+    var(--bg-page);
+}
+/* 登录控件：**居中且不铺满**。给它一组「上下左右都留白」的尺寸（约 66vw × 68vh），
+   四周留出均匀的呼吸，视觉焦点自然落在工号 / PIN / 语言上。
+   ⚠ 行/列必须写成 minmax(0,1fr)，给出**确定的**宽高：
+   .login-card 用了 container-type:size（= contain:size，元素尺寸不能由内容决定），
+   一旦这里退化成「按内容定高」，卡的高度会直接塌成 0 —— 与 index.html 预览框那个坑同源。 */
+.login-wrap{
+  display:grid;
+  /* 1.45 : 1 —— 原来的 1.55 : 1 在 1280 宽下键只有 92px，低于 96 的触控下限；
+     把宽度往键盘挪一点，卡那边还有余量（实测 de 最宽文案仍不溢出）。 */
+  grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr);
+  gap:clamp(10px,1.5vw,30px);
+  width:min(100%, clamp(660px, 66vw, 1180px));
+  height:min(100%, clamp(440px, 68vh, 720px));
+}
+.login-card{
+  container-type:size;width:auto;min-width:0;
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:clamp(14px,3.4cqh,52px) clamp(16px,3cqw,64px);
+  box-shadow:var(--shadow-2);
+  display:flex;flex-direction:column;justify-content:center;align-items:center;
+  gap:clamp(8px,1.9cqh,26px);
+}
+/* 卡本身铺满，但内容不跟着拉成横条：宽度按卡宽比例给上限，卡越宽内容略宽，两端不留空场 */
+.login-card > *{width:100%;max-width:min(100%,clamp(560px,76cqw,1120px))}
+.lg-title{font-size:clamp(22px,6.4cqh,72px);font-weight:800;text-align:center;letter-spacing:.01em}
+.lg-sub{font-size:clamp(11px,2.8cqh,28px);color:var(--text-3);text-align:center}
+.field{display:flex;flex-direction:column}
+.field label{display:block;font-size:clamp(12px,2.3cqh,24px);color:var(--text-2);font-weight:600;margin-bottom:clamp(4px,.9cqh,12px)}
+.field .inp{
+  height:clamp(48px,12.6cqh,148px);border-radius:11px;background:var(--bg-surface-2);
+  border:1.5px solid var(--border);display:flex;align-items:center;
+  padding:0 clamp(10px,2.2cqw,30px);font-size:clamp(16px,4.6cqh,52px);
+}
+.field .inp.focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(26,109,255,.15);background:var(--bg-surface)}
+.lg-btn{
+  height:clamp(50px,13.6cqh,160px);border-radius:11px;margin-top:clamp(4px,1.1cqh,16px);
+  background:var(--brand);color:#fff;font-size:clamp(14px,4.6cqh,50px);font-weight:800;
+  letter-spacing:.16em;box-shadow:0 8px 22px rgba(26,109,255,.3);
+}
+.lg-btn.done{background:var(--st-done);box-shadow:0 8px 22px rgba(35,122,15,.28)}
+.lg-foot{
+  display:flex;justify-content:space-between;gap:10px;
+  font-size:clamp(11px,2.2cqh,22px);color:var(--text-3);white-space:nowrap;
+}
+
+/* ---------- 登录屏的语言切换 ----------
+   为什么必须放在这一屏：登录是每个人每天必经的第一个界面，
+   也是唯一一个「所有人都会看到」的界面 ——    把语言藏进设置里的结果是死锁：看不懂当前语言的人，根本找不到进入设置的路。 */
+.lg-lang{display:flex;flex-direction:column;gap:clamp(4px,1cqh,12px)}
+.lg-lang-lb{
+  font-size:clamp(11px,2cqh,20px);font-weight:600;color:var(--text-3);
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+/* 用本语种自称（简体中文 / Deutsch / العربية），不写 CN/DE/AR ——
+   未登录时看不懂代码，要让人先认出自己的文字，才谈得上后续操作。 */
+.lg-lang-opts{display:flex;flex-wrap:wrap;gap:clamp(5px,1.1cqw,12px)}
+.lg-lang-opts button{
+  height:clamp(40px,6.6cqh,72px);min-height:44px;padding-inline:clamp(8px,1.5cqw,18px);
+  border-radius:9px;background:var(--bg-surface-2);border:1px solid var(--border);
+  font-size:clamp(11px,2.2cqh,22px);font-weight:600;color:var(--text-2);white-space:nowrap;
+}
+.lg-lang-opts button.on{
+  background:color-mix(in srgb,var(--brand) 16%,var(--bg-surface));
+  border:2px solid var(--brand);color:var(--brand-ink);font-weight:800;
+}
+
+/* ---------- 字段状态 ----------
+   未聚焦 / 聚焦（当前输入目标）/ 错误（校验未过）。三态都要能一眼分辨：
+   触屏没有光标概念，不标出「数字键盘现在打到哪儿」，人会以为按了没反应。 */
+.field .inp{cursor:pointer}
+.field .inp.focus{
+  border-color:var(--brand);box-shadow:0 0 0 3px rgba(26,109,255,.15);background:var(--bg-surface);
+}
+.field .inp .ph{color:var(--text-3);font-weight:400}
+.field .inp .dots{letter-spacing:.22em}
+.field .inp.err{border-color:var(--ro-warn-fg);box-shadow:0 0 0 3px color-mix(in srgb,var(--ro-warn-fg) 18%,transparent)}
+.lg-err{
+  display:flex;align-items:center;gap:clamp(4px,.8cqw,10px);
+  font-size:clamp(11px,2.3cqh,22px);font-weight:600;color:var(--ro-warn-fg);
+}
+.lg-err:empty{display:none}
+.numpad{
+  container-type:size;width:auto;min-width:0;
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius);padding:clamp(10px,1.9cqh,26px);box-shadow:var(--shadow-2);
+  display:flex;flex-direction:column;gap:clamp(6px,1.3cqh,18px);
+}
+.np-top{
+  flex:none;height:clamp(30px,6.2cqh,72px);display:flex;align-items:center;justify-content:space-between;
+  padding:0 clamp(4px,1.2cqw,14px);font-size:clamp(11px,2.6cqh,26px);color:var(--text-2);
+}
+.np-top b{font-size:clamp(13px,3.6cqh,38px);color:var(--text)}
+.np-grid{
+  flex:1;min-height:0;display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  grid-template-rows:repeat(4,minmax(0,1fr));
+  gap:clamp(5px,1.2cqh,16px);
+}
+.np-grid button{
+  min-height:0;border-radius:11px;background:var(--bg-surface-2);
+  border:1px solid var(--border);font-size:clamp(18px,6.2cqh,84px);font-weight:700;
+}
+.np-grid button:active{background:var(--bg-elev)}
+.np-grid .fn{font-size:clamp(12px,3.4cqh,40px);color:var(--text-2)}
+.np-grid .ok{
+  background:color-mix(in srgb,var(--brand) 12%,transparent);
+  border:2px solid var(--brand);color:var(--brand-ink);
+  font-size:clamp(12px,3.6cqh,42px);font-weight:800;
+}
+/* 竖屏 / 窄屏：左右挤不下就改上下排（卡在上、键盘在下），键高照旧铺满该栏 */
+@media (max-aspect-ratio:1/1){
+  .login-wrap{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) minmax(0,1fr);
+    height:min(100%, clamp(520px, 88vh, 900px));
+  }
+}
+
+/* 登录态：认证前不暴露任何业务入口。
+   否则屏幕左上角还挂着「桌台 / 合菜 / 单菜」、右上角还写着「张师傅 · 换人」——
+   未登录却已有身份，是自相矛盾的信息；筛选条与搜索框也没有数据可筛。
+   保留品牌块与时钟：登录页仍要让人知道自己站在哪台机器前、现在几点。 */
+#app.is-login .top > .vsep,
+#app.is-login #tabs,
+#app.is-login #chips,
+#app.is-login .search,
+#app.is-login .who,
+#app.is-login .tb-btn{display:none}
+/* ================= 配置抽屉 =================
+   面板必须「完全不透明」：背后是密集文本的菜卡，任何半透明都会糊成一片。
+   三层保障 —— ① 主题令牌挂 <html>（否则拿不到变量，背景声明失效变全透明）
+              ② :root 里有浅色兜底值 ③ 这里再写一层显式兜底色，不依赖变量是否存在。 */
+#fab{
+  /* 归位到分页条末尾（不再浮动）：浮动圆钮会压住最后一张卡的「划单」，
+     分页条本身就是操作区，设置入口放这里语义也更正确。 */
+  flex:none;
+  width:clamp(44px,5.6vh,60px);height:clamp(44px,5.6vh,60px);border-radius:50%;
+  background:var(--brand,#1A6DFF);color:#fff;font-size:clamp(18px,2.4vh,28px);
+  border:2px solid rgba(255,255,255,.28);
+  box-shadow:0 4px 14px rgba(10,20,40,.35);
+  display:grid;place-items:center;
+  transition:transform .12s,box-shadow .12s;
+}
+#fab:active{transform:scale(.94)}
+#fab.on{box-shadow:0 0 0 3px rgba(26,109,255,.35),0 4px 14px rgba(10,20,40,.35)}
+#scrim{
+  position:fixed;inset:0;z-index:65;background:rgba(6,10,16,.5);
+  opacity:0;pointer-events:none;transition:opacity .22s ease;
+}
+#scrim.on{opacity:1;pointer-events:auto}
+#panel{
+  position:fixed;inset-block:0;inset-inline-end:0;width:min(432px,92vw);z-index:70;
+  background:#FFFFFF;                        /* 兜底：变量缺失也不透明 */
+  background:var(--bg-surface,#FFFFFF);
+  border-inline-start:1px solid var(--border,#DBE3EE);
+  box-shadow:-30px 0 80px rgba(0,0,0,.55);
+  display:flex;flex-direction:column;
+  transform:translateX(105%);transition:transform .28s cubic-bezier(.4,0,.2,1);
+  isolation:isolate;
+}
+[dir="rtl"] #panel{transform:translateX(-105%)}
+#panel.open{transform:none}
+.pn-hd{
+  flex:none;display:flex;align-items:center;gap:10px;padding:18px 20px;
+  border-bottom:1px solid var(--border,#DBE3EE);
+  position:sticky;top:0;z-index:2;
+  background:#FFFFFF;background:var(--bg-surface,#FFFFFF);
+}
+.pn-hd b{font-size:18px;font-weight:800;letter-spacing:.01em}
+.pn-hd .hint{font-size:12px;font-weight:700;color:var(--text-3,#5C6875)}
+.pn-hd .x{
+  margin-inline-start:auto;width:44px;height:44px;border-radius:10px;
+  background:var(--bg-surface-2,#F5F8FC);border:1px solid var(--border,#DBE3EE);
+  font-size:19px;color:var(--text,#111820);font-weight:700;
+}
+.pn-hd .x:active{background:var(--bg-elev,#E9EFF7)}
+.pn-bd{flex:1;overflow-y:auto;padding:16px 20px 28px;display:flex;flex-direction:column;gap:18px}
+/* 细滚动条：默认隐形，鼠标移入才显形（触摸屏看不到也不碍事） */
+.pn-bd::-webkit-scrollbar{width:6px}
+.pn-bd::-webkit-scrollbar-thumb{background:transparent;border-radius:3px}
+.pn-bd:hover::-webkit-scrollbar-thumb{background:var(--border-strong,#C2CFDF)}
+/* 配套的上下翻屏按钮（触摸屏必须能翻，不能只靠滚轮） */
+#pnJump{flex:none;display:flex;gap:8px;padding:10px 20px;border-top:1px solid var(--border,#DBE3EE);background:var(--bg-surface,#fff)}
+#pnJump button{
+  flex:1;height:44px;border-radius:9px;background:var(--bg-elev,#E9EFF7);
+  border:1.5px solid var(--border,#DBE3EE);color:var(--text,#111820);
+  font-size:14px;font-weight:800;letter-spacing:.02em;
+}
+#pnJump button:disabled{opacity:.38}
+#pnJump button:active:not(:disabled){background:var(--bg-surface-2,#F5F8FC)}
+.grp{display:flex;flex-direction:column;gap:8px}
+.grp > label{
+  font-size:12px;font-weight:800;color:var(--text-3,#5C6875);letter-spacing:.06em;
+  display:flex;justify-content:space-between;align-items:center;
+}
+.grp > label em{font-style:normal;color:var(--brand-ink,var(--brand,#1A6DFF));font-size:13px;letter-spacing:0;font-weight:800}
+.opts{display:flex;gap:7px;flex-wrap:wrap}
+.opts button{
+  flex:1 1 auto;min-width:56px;height:44px;border-radius:9px;
+  background:var(--bg-surface-2,#F5F8FC);border:1.5px solid var(--border,#DBE3EE);
+  font-size:14px;font-weight:700;color:var(--text-2,#55616F);
+  padding:0 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.opts button.on{background:var(--brand,#1A6DFF);border-color:var(--brand,#1A6DFF);color:#fff;font-weight:800}
+.opts button.sm{font-size:13px}
+.range{display:flex;align-items:center;gap:12px}
+.range input[type=range]{flex:1;accent-color:var(--brand,#1A6DFF);height:26px}
+.range .v{font-size:14px;font-weight:800;color:var(--brand-ink,var(--brand,#1A6DFF));min-width:52px;text-align:end}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;font-weight:600;color:var(--text-2,#55616F)}
+.sw button{
+  width:52px;height:30px;border-radius:15px;background:var(--border-strong,#C2CFDF);
+  position:relative;flex:none;transition:background .2s;
+}
+.sw button::after{
+  content:"";position:absolute;top:3px;inset-inline-start:3px;width:24px;height:24px;
+  border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3);
+}
+.sw button.on{background:var(--st-done,#237A0F)}
+.sw button.on::after{transform:translateX(22px)}
+[dir="rtl"] .sw button.on::after{transform:translateX(-22px)}
+.readout{
+  background:var(--bg-surface-2,#F5F8FC);border:1.5px solid var(--border,#DBE3EE);border-radius:10px;
+  padding:12px 14px;font-size:12.5px;line-height:1.95;color:var(--text-2,#55616F);
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;
+}
+.readout b{color:var(--text,#111820);font-weight:800}
+.readout .warn{color:var(--ro-warn-fg,#C4001A);font-weight:800;background:var(--ro-warn-bg,#FFE4E6);padding:0 4px;border-radius:3px}
+.readout .ok{color:var(--ro-ok-fg,#1F6A0C);font-weight:800;background:var(--ro-ok-bg,#DFF5D6);padding:0 4px;border-radius:3px}
+.pn-tip{font-size:12px;color:var(--text-3,#5C6875);line-height:1.7}
+.pn-tip code{font-family:ui-monospace,Menlo,monospace;background:var(--bg-elev,#E9EFF7);padding:1px 4px;border-radius:3px}
+.pn-tip b{color:var(--text-2,#55616F);font-weight:700}
+/* tip 里的行内动作按钮：不抢主控件的视觉重量，但要够大能点（面板是触摸场景） */
+.pn-btn{
+  margin-top:6px;padding:0 10px;height:30px;min-width:44px;border-radius:7px;
+  border:1.5px solid var(--border-strong,#C2CFDF);background:var(--bg-surface-2,#F5F8FC);
+  color:var(--text-2,#55616F);font-size:12px;font-weight:700;white-space:nowrap;
+}
+.pn-btn:active{background:var(--brand,#1A6DFF);border-color:var(--brand,#1A6DFF);color:#fff}
+/* 溢出审计 */
+#app.audit .ovf{outline:1.5px dashed #FF3B30;outline-offset:2px;position:relative}
+#app.audit .ovf::after{
+  content:"⋯";position:absolute;inset-inline-end:-2px;top:-11px;background:#FF3B30;color:#fff;
+  font-size:9px;line-height:1;padding:1px 3px;border-radius:3px;z-index:9;
+}
+#auditBar{
+  position:fixed;inset-inline-start:50%;top:8px;transform:translateX(-50%);
+  background:#FF3B30;color:#fff;font-size:12px;font-weight:800;padding:6px 14px;border-radius:8px;
+  z-index:80;display:none;box-shadow:0 6px 20px rgba(255,59,48,.4);white-space:nowrap;
+}
+#auditBar.on{display:block}
+
+/* ============================================================================
+   综合屏 A-06 —— 多档口混合
+   这一屏的四个决策点必须「看得见、切得动」，所以屏幕上带一条对照条：
+   汇总条（顶部三个大数字）/ 布局（统一网格 vs 按档口分栏）/ 权限（可操作 vs 只读）。
+   卡片本体复用 .scard（单菜卡）：字号系数、容器查询、主题、触摸尺寸全部继承，
+   评审时不需要为新形态重新建立判断标准。
+   ============================================================================ */
+.combo{
+  flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;
+  gap:clamp(6px,.7vw,16px);
+  /* 内边距由 #body 统一给（.body 已有 padding），这里再加一层会让综合屏的卡片区
+     比其它视图窄一圈、上下还多出空档 —— 切个范围版面就跳，是最难忍的那种不一致。 */
+  padding:0;
+}
+/* ---- ① 顶部看板式汇总：待制作 / 超时 / 催菜 / 跨日 / 最长等待 ----
+   一条横带，五档等分。数字与状态**横排**（数字在前、状态紧跟），整组居中：
+   竖排时每格被数字撑得很高、右侧却空一大片；两端对齐（space-between）同样不行，
+   那等于在每格中间空出一段谁都读不到的距离。
+   五格而不是三格，是因为 1920 只摆三个数字时右半边必然是空的。 */
+.csum{
+  flex:none;display:flex;align-items:stretch;
+  min-height:clamp(50px,7vh,86px);
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:var(--shadow-1);overflow:hidden;
+}
+/* 格内用 grid 而不是 flex：单行 flex 容器里 align-content 不起作用，
+   一旦整条有了 min-height，数字和状态就会贴着格子顶边；
+   grid 的 place-content:center 才能在「基线对齐」的前提下把整组垂直居中。 */
+.csum-cell{
+  flex:1 1 0;min-width:0;display:grid;grid-template-columns:auto auto;
+  align-items:baseline;place-content:center;
+  gap:clamp(4px,.45vw,10px);
+  padding:clamp(4px,.6vh,12px) clamp(8px,.8vw,20px);
+}
+.csum-cell + .csum-cell{border-inline-start:1px solid var(--border)}
+.csum-cell b{
+  flex:none;font-size:clamp(24px,min(3.6vh,2.4vw),48px);line-height:1.02;font-weight:800;
+  color:var(--text);font-variant-numeric:tabular-nums;
+}
+.csum-cell span{
+  min-width:0;font-size:clamp(12px,1.5vh,20px);font-weight:800;color:var(--text-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.csum-cell.is-late  b{color:var(--st-timeout)}
+.csum-cell.is-warn  b{color:var(--st-warn,#E8A33D)}
+.csum-cell.is-cross b{color:var(--warn-line,#D9A94A)}
+/* 旧的三格版留着说明文字的位置，现在五档自己填满，这条不再渲染 —— 保留类名以防深链截图脚本引用 */
+.csum-note{
+  margin-inline-start:auto;flex:0 1 auto;min-width:0;
+  font-size:clamp(10px,1.2vh,16px);font-weight:800;color:var(--text-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* ---- ② 对照条：虚线边框表示「这不是产品 UI，是评审对照位」 ---- */
+.cbar{
+  flex:none;display:flex;align-items:center;gap:clamp(6px,.6vw,14px);flex-wrap:wrap;
+  padding:clamp(4px,.55vh,10px) clamp(8px,.8vw,18px);
+  background:var(--bg-surface-2);border:1px dashed var(--border-strong);border-radius:var(--radius);
+}
+.cseg{display:flex;align-items:center;gap:clamp(4px,.4vw,8px);min-width:0}
+.cseg-lb{font-size:clamp(10px,1.15vh,15px);font-weight:800;color:var(--text-3);white-space:nowrap}
+.cseg button,.cbar-sw{
+  height:clamp(28px,3.4vh,46px);padding:0 clamp(8px,.75vw,16px);border-radius:8px;
+  border:1px solid var(--border-strong);background:var(--bg-surface);color:var(--text-2);
+  font-size:clamp(11px,1.3vh,17px);font-weight:800;white-space:nowrap;
+}
+.cseg button.on{
+  background:var(--brand);border-color:var(--brand);color:var(--on-brand,#fff);
+}
+.cbar-sw{display:inline-flex;align-items:center;gap:clamp(4px,.4vw,8px)}
+.cbar-sw i{
+  flex:none;width:clamp(15px,1.7vh,24px);height:clamp(8px,1vh,14px);border-radius:999px;
+  background:var(--border-strong);position:relative;
+}
+.cbar-sw i::after{
+  content:"";position:absolute;top:1.5px;inset-inline-start:2px;
+  width:calc(clamp(8px,1vh,14px) - 3px);height:calc(clamp(8px,1vh,14px) - 3px);
+  border-radius:50%;background:var(--bg-surface);transition:transform .14s ease;
+}
+.cbar-sw.on{
+  background:color-mix(in srgb,var(--brand) 14%,transparent);
+  border-color:var(--brand);color:var(--brand-ink);
+}
+.cbar-sw.on i{background:var(--brand)}
+.cbar-sw.on i::after{transform:translateX(calc(clamp(15px,1.7vh,24px) - clamp(8px,1vh,14px) - 2px))}
+[dir="rtl"] .cbar-sw.on i::after{transform:translateX(calc(-1 * (clamp(15px,1.7vh,24px) - clamp(8px,1vh,14px) - 2px)))}
+.cbar-note{
+  margin-inline-start:auto;flex:1 1 auto;min-width:0;
+  font-size:clamp(9px,1.05vh,14px);line-height:1.35;color:var(--text-3);
+}
+/* ---- ③ 主体：统一网格 ---- */
+.cgrid{flex:1;min-height:0;display:grid;gap:clamp(4px,.5vw,12px)}
+/* ---- ③ 主体：按档口分栏（B 案）---- */
+.ccols{
+  flex:1;min-height:0;display:grid;
+  /* 列数跟着档口数走，不写死 5：档口加一个就多一列，
+     写死的话第 6 个档口会掉到第二行 —— 那正是「卡片掉下来」的另一种形态。 */
+  grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);
+  gap:clamp(6px,.6vw,14px);
+}
+.ccol{min-width:0;min-height:0;display:flex;flex-direction:column;gap:clamp(3px,.4vw,8px)}
+.ccol-hd{
+  flex:none;display:flex;align-items:center;gap:8px;min-width:0;
+  padding:clamp(3px,.55vh,10px) clamp(6px,.6vw,12px);
+  background:var(--bg-surface-2);border:1px solid var(--border);border-radius:9px;
+}
+.ccol-hd b{
+  min-width:0;font-size:clamp(12px,1.5vh,20px);font-weight:800;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ccol-n{
+  flex:none;margin-inline-start:auto;min-width:1.7em;text-align:center;
+  font-size:clamp(11px,1.3vh,17px);font-weight:800;color:var(--brand-ink);
+  background:color-mix(in srgb,var(--brand) 14%,transparent);
+  border-radius:999px;padding:0 .45em;
+}
+.ccol-bd{
+  flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);
+  grid-auto-rows:minmax(0,1fr);gap:clamp(4px,.5vw,10px);overflow:hidden;
+}
+/* 一屏装不下的部分：作业屏不能滚动，所以如实报数，不藏着 */
+.ccol-more{
+  flex:none;text-align:center;font-size:clamp(10px,1.15vh,16px);font-weight:800;
+  color:var(--text-3);padding-block:clamp(2px,.35vh,6px);
+  background:var(--bg-surface-2);border:1px dashed var(--border-strong);border-radius:8px;
+}
+/* ---- 档口标签：多档口混合时，没有它师傅分不清「这道该谁做」 ---- */
+.cst{
+  flex:none;align-self:flex-start;max-width:calc(100% - clamp(12px,1.5cqw,30px));
+  margin-inline-start:calc(clamp(6px,.75cqw,15px) + clamp(3px,.34vw,7px));
+  margin-block-end:clamp(2px,.6cqh,7px);
+  font-size:clamp(9px,calc(var(--k-tip-w) * 1cqw),20px);font-weight:800;letter-spacing:.02em;
+  padding:.14em .5em;border-radius:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  color:var(--brand-ink);
+  background:color-mix(in srgb,var(--brand) 13%,transparent);
+  border:1px solid color-mix(in srgb,var(--brand) 30%,transparent);
+}
+/* 只读态与卡尾的关系：**.sft 永远渲染**（等待时长 + 份数＝进度本身，只读屏就是来看这个的）。
+   这里原先有一条 `.ccard.ro .sft{display:none}`，是综合屏还是第四视图时留下的死规则，
+   与现在的口径正好相反 —— 留着迟早有人照着它「优化」回去。 */
+/* 只读屏不该出现「我的划单」：点进去永远为空，是被误导的入口。
+   「换人」仍然成立（只读屏也要能交接），所以只收这一个按钮。 */
+#app.is-ro #tbMine{display:none}
+
+/* ============================================================================
+   屏端设置页 A-12
+   与作业屏三视图的两处不同，都是刻意的：
+     1) 本页是唯一允许滚动的页（表单项塞不进一屏，硬撑只会让字变小到读不清）
+     2) 正文用常规字号 13→20px（触屏作业屏是 28px 起）—— 设置是「坐下来慢慢配」的场景，
+        不是「站 1.5 米外扫一眼」，沿用作业屏字号反而会一屏只放得下三行
+   顶栏照例收起全部业务入口：设置页不是作业态，露着「切换视图 / 筛选」是自相矛盾。
+   ============================================================================ */
+#app.is-settings .top > .vsep,#app.is-settings #tabs,#app.is-settings #chips,
+#app.is-settings .search,#app.is-settings .who,#app.is-settings .tb-btn{display:none}
+.set{
+  flex:1;min-height:0;min-width:0;display:grid;
+  grid-template-columns:clamp(150px,15vw,250px) minmax(0,1fr);
+  gap:var(--gap);padding:var(--pad);
+}
+.set-nav{display:flex;flex-direction:column;gap:clamp(5px,.6vh,10px);min-width:0;overflow:auto}
+.set-nav-i{
+  flex:none;display:flex;align-items:center;gap:8px;min-width:0;text-align:start;
+  min-height:clamp(42px,5.6vh,62px);
+  padding:clamp(6px,.9vh,14px) clamp(8px,.9vw,16px);
+  background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;
+}
+.set-nav-i b{
+  min-width:0;font-size:clamp(13px,1.65vh,20px);font-weight:800;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.set-nav-i > span{
+  flex:none;margin-inline-start:auto;font-size:clamp(10px,1.2vh,15px);font-weight:800;
+  color:var(--text-3);background:var(--bg-surface-2);
+  border-radius:999px;padding:.05em .55em;min-width:1.7em;text-align:center;
+}
+.set-nav-i.on{background:var(--brand);border-color:var(--brand)}
+.set-nav-i.on b{color:var(--on-brand,#fff)}
+.set-nav-i.on > span{color:var(--on-brand,#fff);background:rgba(255,255,255,.22)}
+.set-main{min-width:0;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:clamp(6px,.8vh,14px)}
+.set-hd{display:flex;align-items:baseline;gap:clamp(8px,.9vw,16px);flex-wrap:wrap}
+.set-hd b{font-size:clamp(16px,2.1vh,26px);font-weight:800;color:var(--text)}
+.set-hd span{font-size:clamp(11px,1.25vh,16px);color:var(--text-3)}
+.set-bd{
+  min-height:0;overflow:auto;display:flex;flex-direction:column;
+  gap:clamp(10px,1.4vh,22px);padding-inline-end:clamp(4px,.5vw,10px);
+}
+.set-grp{
+  display:flex;flex-direction:column;gap:clamp(5px,.85vh,13px);
+  padding:clamp(10px,1.4vh,20px) clamp(12px,1.2vw,26px);
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:var(--shadow-1);
+}
+.set-grp-hd{
+  display:flex;align-items:center;gap:clamp(8px,.8vw,14px);flex-wrap:wrap;
+  font-size:clamp(14px,1.85vh,22px);font-weight:800;color:var(--text);
+}
+.set-grp-hd > span{
+  font-size:clamp(10px,1.15vh,15px);font-weight:700;color:var(--text-3);
+  background:var(--bg-surface-2);border-radius:999px;padding:.1em .6em;
+}
+.set-row{
+  display:grid;grid-template-columns:minmax(120px,26%) minmax(0,1fr);
+  align-items:center;gap:clamp(8px,1vw,18px);
+  padding-block:clamp(4px,.6vh,10px);border-top:1px solid var(--row-line,rgba(0,0,0,.06));
+}
+.set-row:first-of-type{border-top:0}
+.set-lb{
+  min-width:0;font-size:clamp(13px,1.5vh,19px);font-weight:700;color:var(--text-2);
+  overflow-wrap:anywhere;
+}
+.set-ct{min-width:0;display:flex;flex-direction:column;gap:clamp(3px,.4vh,7px);align-items:flex-start}
+.set-note{grid-column:2;font-size:clamp(10px,1.15vh,15px);line-height:1.4;color:var(--text-3)}
+/* ⑥ 高风险开关的警示必须够刺眼，否则会被随手打开 */
+.set-warn{
+  grid-column:2;font-size:clamp(11px,1.3vh,17px);font-weight:800;line-height:1.35;
+  color:var(--st-timeout);
+}
+.set-inp{
+  height:clamp(34px,4.6vh,54px);width:clamp(66px,7vw,130px);
+  padding-inline:clamp(6px,.6vw,12px);border-radius:8px;
+  border:1px solid var(--border-strong);background:var(--bg-surface-2);color:var(--text);
+  font:inherit;font-size:clamp(13px,1.6vh,20px);font-weight:800;
+}
+.set-inp.wide{width:100%;max-width:clamp(200px,24vw,460px)}
+.set-num{display:flex;align-items:center;gap:clamp(6px,.6vw,12px);min-width:0;flex-wrap:wrap}
+.set-sug{font-size:clamp(10px,1.2vh,15px);font-weight:700;color:var(--brand-ink);white-space:nowrap}
+/* ③ 字号三档并排小样：档位不能是抽象名词，得看到「这一档实际多大」 */
+.set-font{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:clamp(6px,.7vw,14px);width:100%;max-width:clamp(300px,34vw,680px);
+}
+.set-font-i{
+  min-width:0;display:flex;flex-direction:column;gap:clamp(2px,.3vh,6px);
+  padding:clamp(6px,.9vh,14px);border:1.5px solid var(--border);border-radius:10px;
+  background:var(--bg-surface-2);cursor:pointer;
+}
+.set-font-i.on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.sf-lb{font-size:clamp(10px,1.2vh,15px);font-weight:800;color:var(--text-3)}
+.sf-sample{
+  font-weight:800;color:var(--text);line-height:1.18;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.sf-px{font-size:clamp(9px,1.05vh,13px);color:var(--text-3);font-variant-numeric:tabular-nums}
+/* ④ ▲▼：触摸屏没有滚轮，本页又是唯一可滚动的页，没有它就改不到底部 */
+.set-jump{display:flex;gap:clamp(6px,.6vw,10px);justify-content:flex-end}
+.set-jump button{
+  width:clamp(34px,4.2vh,52px);height:clamp(34px,4.2vh,52px);border-radius:9px;
+  border:1px solid var(--border-strong);background:var(--bg-surface);
+  color:var(--text-2);font-size:clamp(13px,1.5vh,19px);font-weight:800;
+}
+.set-ft{display:flex;justify-content:flex-end;gap:clamp(8px,.9vw,18px)}
+/* ⑤ 数据库区只属于 Master：切成「普通屏」时整组消失，只剩一句说明 */
+.set-grp:not(.is-master){border-style:dashed}
+.set-grp:not(.is-master) > .set-row{display:none}
+.set-hidden-note{display:none;font-size:clamp(10px,1.2vh,15px);color:var(--text-3);font-style:italic}
+.set-grp:not(.is-master) > .set-hidden-note{display:block}

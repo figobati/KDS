@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<!-- 主题挂 <html> 而非 #app：面板 / FAB / 弹层都在 #app 之外，
+     若只挂在 #app 上，这些元素拿不到令牌变量 → 背景色失效变全透明。 -->
+<html lang="zh-CN" dir="ltr" data-theme="b" data-contrast="normal">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KDS · 满铺自适应原型</title>
+<!-- 样式外置：结构与版式 / 主题 A（夜航）/ 主题 B（晨光）分层管理。
+     改主题只改 <html data-theme> 属性，不换 CSS 文件；
+     加载顺序 core → theme-a → theme-b 不能反（主题令牌与 :root 兜底同特异性，靠后来者胜）。 -->
+<link rel="stylesheet" href="css/core.css">
+<link rel="stylesheet" href="css/theme-a.css">
+<link rel="stylesheet" href="css/theme-b.css">
+</head>
+<body>
+
+<div id="app">
+  <header class="top" id="top">
+    <div class="brand"><b id="brandName">切配屏 1</b><span id="brandSub">热菜切配 · 档口视图</span></div>
+    <div class="vsep"></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="chips" id="chips"></div>
+    <div class="top-sp"></div>
+    <div class="search">
+      <span class="ico">⌕</span>
+      <input id="searchInput" readonly>
+      <!-- 触摸键盘开关。做成常驻（不按 pointer:coarse 自动隐藏）：
+           演示 / 走查 / 投屏评审时也要能当场点开，藏起来等于每次都要解释一遍。 -->
+      <button id="kbBtn" title="触摸键盘（点一下开关）" aria-label="触摸键盘">⌨</button>
+    </div>
+    <div class="who"><div class="av">张</div><div class="nm">张师傅</div></div>
+    <button class="tb-btn"><span class="lbl">换人</span></button>
+    <button class="tb-btn" id="tbMine"><span class="lbl">我的划单</span></button>
+    <div class="vsep"></div>
+    <div class="clock">17:58<small id="bizDay">营业日 10</small></div>
+  </header>
+
+  <main class="body" id="body"></main>
+
+  <!-- 触摸键盘（底部抽屉，默认收起）
+       关键：它是 #app 的直接子元素，不在 .body 里。
+       放进 #body 就只能走「挤压卡片」那条路（方案 C），那是另一套取舍；
+       这里要的是「盖住末排 + 分页条」，抽屉必须浮在内容区之上。
+       另一个理由：抽屉顶部的实时命中条替掉了「抬头看顶栏」这个动作，
+       正在打字的手和正在看的眼睛因此落在同一块区域。 -->
+  <div id="kb" hidden>
+    <div class="kb-hd">
+      <div class="kb-val" id="kbVal"></div>
+      <div class="kb-tab" role="group" aria-label="键盘布局">
+        <button data-page="num" class="on">数字</button>
+        <button data-page="abc">字母</button>
+      </div>
+      <button class="kb-x" id="kbX" title="收起">⌄</button>
+    </div>
+    <div class="kb-hit" id="kbHit"></div>
+    <div class="kb-keys" id="pageNum"></div>
+    <div class="kb-keys hide" id="pageAbc"></div>
+  </div>
+
+  <footer class="pager" id="pager">
+    <button class="pg-btn" id="pgPrev"><span class="ar">◀</span><span id="pgPrevTxt">上一页</span></button>
+    <div class="pg-mid">
+      <span id="pgTimeout" class="pg-info"></span>
+      <span class="pg-num" id="pgNum"></span>
+      <div class="pg-dots" id="pgDots"></div>
+      <span id="pgTotal" class="pg-info"></span>
+    </div>
+    <button class="pg-btn" id="pgNext"><span id="pgNextTxt">下一页</span><span class="ar">▶</span></button>
+    <button id="fab" title="显示设置（P）">⚙</button>
+  </footer>
+</div>
+
+<div id="auditBar"></div>
+<div id="scrim"></div>
+
+<aside id="panel">
+  <div class="pn-hd">
+    <b>显示与布局</b>
+    <span class="hint">实时生效</span>
+    <button class="x" id="pnClose" title="关闭（Esc）">✕</button>
+  </div>
+  <div class="pn-bd">
+    <div class="grp">
+      <label>配置对象 <em id="viewNote">桌台</em></label>
+      <div class="opts" id="optView">
+        <button data-v="table">桌台</button>
+        <button data-v="merge">合菜</button>
+        <button data-v="single">单菜</button>
+        <button data-v="combo">综合</button>
+      </div>
+      <div class="pn-tip">三种视图各自记住行列与字号，切换不会互相覆盖。点上面按钮可直接跳到该视图看效果。</div>
+    </div>
+
+    <div class="grp">
+      <label>视觉方案</label>
+      <div class="opts" id="optTheme">
+        <button data-v="a">A · 夜航</button>
+        <button data-v="b">B · 晨光</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label>界面语言 <em id="langNote"></em></label>
+      <div class="opts" id="optLang">
+        <button data-v="zh">中文</button>
+        <button data-v="yue">繁體</button>
+        <button data-v="en">EN</button>
+        <button data-v="de">DE</button>
+        <button data-v="ru">RU</button>
+        <button data-v="ar">AR</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <label><span id="colsLabel">每行卡片数</span> <em id="colsV">3</em></label>
+      <div class="opts" id="optCols"></div>
+    </div>
+
+    <div class="grp">
+      <label><span id="rowsLabel">每列行数</span> <em id="rowsV">2</em></label>
+      <div class="opts" id="optRows"></div>
+    </div>
+
+    <div class="grp">
+      <div class="sw"><span>按屏幕自动定行列</span><button id="swAuto" class="on"></button></div>
+      <div class="pn-tip">自动密度用「理想卡尺寸」反推：桌台 560×400 · 合菜 360×250 · 单菜 272×186。手动点行列会关闭自动。</div>
+    </div>
+
+    <div class="grp">
+      <div class="sw"><span>末页铺满</span><button id="swFill"></button></div>
+      <div class="pn-tip">默认关：末页剩下几个格子就空几个格子，<b>卡片尺寸始终等于「列数 × 行数」算出来的大小</b>，翻页时不会忽大忽小。打开后末页会收行、卡片放大铺满整屏。</div>
+    </div>
+
+    <div class="grp">
+      <label>字号缩放 · <span id="fsNote">桌台</span> <em id="fsV">100%</em></label>
+      <div class="range"><input type="range" id="fsRange" min="0.75" max="1.35" step="0.05" value="1"></div>
+      <div class="pn-tip">三种视图<b>各存一档、互不干扰</b>：桌台卡 600×362 与单菜卡 253×178 差一个量级，同一档字号在两张卡上的实际 px 完全不同，共用一根滑块只会逼你来回重调。<br><button id="fsAll" class="pn-btn">把当前值套用到全部视图</button></div>
+    </div>
+
+    <div class="grp">
+      <label>桌台卡菜名</label>
+      <div class="opts" id="optLines">
+        <button data-v="1">单行省略</button><button data-v="2">两行截断</button>
+      </div>
+      <div class="pn-tip">单菜小卡固定「最多两行」——卡面太小，只给一行会把德语/俄语菜名截掉大半。</div>
+    </div>
+
+    <div class="grp">
+      <label>环境</label>
+      <div class="opts" id="optContrast">
+        <button data-v="normal">标准</button><button data-v="hi">强反光</button>
+      </div>
+    </div>
+
+    <div class="grp">
+      <div class="sw"><span>溢出审计（标出被截断的文本）</span><button id="swAudit"></button></div>
+    </div>
+
+    <div class="grp">
+      <label>实时读数</label>
+      <div class="readout" id="readout"></div>
+      <div class="pn-tip">字号由卡片尺寸反推：<code>min(cqw, cqh) × 系数 × 缩放</code>。列数/行数一变，字号自动跟随，不需要手动改字号。</div>
+    </div>
+  </div>
+  <div id="pnJump">
+    <button id="pnUp">▲ 上翻</button>
+    <button id="pnDown">▼ 下翻</button>
+  </div>
+</aside>
+
+<script>
+/* ============================================================================
+   0. 状态
+   ============================================================================ */
+const S = {
+  theme:'b', lang:'zh', cols:3, rows:2, lines:1, scale:1, contrast:'normal', auto:true,
+  /* fill：末页不满时是否收行让卡片放大铺满。默认关——收行会让卡片尺寸随数据量跳动 */
+  fill:false,
+  audit:false, page:0, view:'table', sel:new Set(),
+  /* 三种视图各自记住自己的行列（S.cols/S.rows 始终代表「当前视图」） */
+  dens:{ table:{cols:3,rows:2}, merge:{cols:4,rows:3}, single:{cols:6,rows:4}, combo:{cols:8,rows:5} },
+  /* 三种视图各自记住自己的字号缩放（S.scale 始终代表「当前视图」）。
+     必须独立：桌台卡 600×362 与单菜卡 253×178 差一个量级，同一档字号在两张卡上
+     的实际 px 完全不同，共用一根滑块等于强迫用户在两种视图间反复重调。
+     CSS 侧不受影响 —— 同一时刻只渲染一个视图，render() 里按当前 S.scale 重算 --k-* 即可。 */
+  fonts:{ table:1, merge:1, single:1, combo:1 },
+  /* 综合屏（A-06）的三个对照开关 —— 它们不是产品配置项，是「评审对照位」：
+     综合屏的决策点本来就是「到底要不要这么做」，原型必须能让评审者当场 A/B。 */
+  comboLay:'grid',   // 'grid' 统一网格 | 'cols' 按档口分栏
+  comboOp:'on',      // 'on' 可操作 | 'off' 只读（EnableOperate=0）
+  comboSum:true,     // 顶部看板式汇总条
+  /* 登录屏的表单状态。必须是模块级而不是 renderLogin 内的局部变量：
+     render() 每次都重建整个登录卡（切语言也要重建），局部变量会在重建时被清空 ——
+     人还没输完，点一下语言，工号就飞了。 */
+  login:{ emp:'', pin:'', tgt:'emp', err:'' },
+  /* 触摸键盘（顶栏搜索框）。同样必须挂在 S 上：render() 每次重建卡片网格，
+     搜索词与开合状态是跨重建的状态，放局部变量会在切视图 / 切语言时丢。 */
+  kb:false, kbPage:'num', q:''
+};
+
+/* ============================================================================
+   1. 词典（6 语言 —— 文本长度梯度见下方 LANG_META.len，以 zh 为 1.0）
+   ============================================================================ */
+/* 语言元数据：HTML lang 标签 / 书写方向 / 文本膨胀系数 / 全名。
+   yue 必须写成 yue-Hant-HK：裸 'yue' 只声明「这是粤语」，不带文字系统，
+   浏览器仍可能按简体字形回退 —— 繁体正字的正确呈现依赖 -Hant。 */
+const LANG_META = {
+  zh :{tag:'zh-CN',       dir:'ltr', len:1.00, name:'简体中文'},
+  yue:{tag:'yue-Hant-HK', dir:'ltr', len:1.15, name:'粵語 · 繁體'},
+  en :{tag:'en',          dir:'ltr', len:1.70, name:'English'},
+  de :{tag:'de',          dir:'ltr', len:2.20, name:'Deutsch'},
+  ru :{tag:'ru',          dir:'ltr', len:2.30, name:'Русский'},
+  ar :{tag:'ar',          dir:'rtl', len:1.35, name:'العربية'}
+};
+const langMeta = () => LANG_META[S.lang] || LANG_META.zh;
+
+const T = {
+  zh:{brand:'切配屏 1',sub:'热菜切配 · 档口视图',tabTable:'桌台',tabMerge:'合菜',tabSingle:'单菜',
+    fAll:'全部',fUrge:'催菜',fTimeout:'超时',fHold:'等叫',search:'搜索菜名 / 桌号 / 订单号',
+    kbNum:'数字',kbAbc:'字母',kbClear:'清空',kbSpace:'空格',kbGo:'确认搜索',
+    kbHint:'输入后这里显示命中',kbNone:'没有命中',kbHit:'命中 {n} 项',
+    handover:'换人',myOrders:'我的划单',logout:'退出',biz:'营业日 10',
+    call:'叫号',clear:'划单',prev:'上一页',next:'下一页',
+    timeoutN:'超时 {n} 桌',urgeN:'催菜 2 桌',totalN:'共 {n} 桌',page:'第 {n} / {m} 页',
+    timeoutDish:'超时 {n} 道',totalDish:'共 {n} 道菜',totalSingle:'共 {n} 道待出',todo:'待制作',mWarn:'即将超时',
+    dishes:'{n} 道',unit:'份',more:'+{n} 道',
+    mergeTitle:'合菜 · 按菜品聚合',mergeSel:'已选 {n} 道',batch:'批量划单',singleKick:'出菜',
+    singleTitle:'单菜视图 · 按出菜顺序',sTable:'桌号',sDish:'菜品',sQty:'数量',sWay:'做法',sWait:'等待',sFlag:'标记',sOp:'操作',
+    loginTitle:'切配屏登录',loginSub:'请输入工号与 PIN 码',empNo:'工号',pin:'PIN 码',loginBtn:'登 录',lgLang:'语言',empPh:'未输入',pinPh:'至少 4 位',loginErr:'请输入工号，PIN 至少 4 位',loginOk:'✓ 登录成功',npClear:'清空',
+    shift:'早班 · 08:00–16:00',ver:'v2.7.1 · 满铺自适应',
+    wait:'等待',sel:'已选',cfgTitle:'显示与布局',login:'登录',fsApplied:'✓ 已套用到三个视图',themeA:'A · 夜航',themeB:'B · 晨光',
+    d_kungpao:'宫保鸡丁',d_rice:'米饭',d_soup:'例汤',d_cucumber:'拍黄瓜',d_wuchan:'拌黄瓜',
+    d_steamfish:'清蒸鲈鱼',d_buddha:'佛跳墙',d_coke:'可乐',d_mabo:'麻婆豆腐',
+    d_waterfish:'水煮鱼',d_cauliflower:'干锅花菜',d_egg:'莴苣炒蛋',d_beef:'番茄牛腩',
+    d_offal:'鲜麻青椒牛油锅底附毛肚',d_shrimp:'蒜蓉粉丝蒸虾',
+    t_mild:'微辣',t_peanut:'少花生',t_spicy:'加辣',t_ice:'冰',t_room:'常温',t_med:'中辣',
+    t_hot:'特辣',t_hold:'等叫',t_serve:'起菜',
+    b_urgent:'加急',b_timeout:'超时',b_urge:'催',b_hold:'等叫',b_fire:'起菜',b_gift:'赠',
+    b_join:'联台',b_sun:'周日',b_rush:'催菜',b_new:'新',
+    /* —— A-06 综合屏 —— */
+    tabCombo:'综合',sumTodo:'待制作',sumLate:'超时',sumCross:'跨日',
+    st_hot:'热菜',st_cold:'凉菜',st_dim:'面点',st_roast:'烧腊',st_drink:'饮品',
+    layTitle:'布局',layGrid:'统一网格',layCols:'按档口分栏',opTitle:'权限',opOn:'可操作',opOff:'只读',
+    roNote:'只读：卡尾整条隐藏、卡片变矮（不是置灰）',
+    comboTotal:'共 {n} 道', comboSum:'汇总条', tabSet:'设置',setTitle:'屏端设置',setNote:'本页允许滚动（作业屏唯一例外）', fConfirm:'划单需二次确认',fHoldTop:'等叫菜自动置顶',fTagShow:'显示做法与标记',fFloorSel:'本屏负责楼层',fStation:'所属档口',setSave:'确定',setCancel:'取消',gBasic:'基础',gDish:'菜品',gFloor:'厅面楼层',gGeneral:'通用',gTimeout:'超时',fLang:'界面语言',fCols:'每行卡片数',fRows:'每列行数',fFont:'显示字号',fTheme:'视觉方案',fSuggest:'建议 {n}',fNoAuto:'只提示，不自动改你填的值',fDb:'数据库连接（仅 Master 本机）',fDbNote:'普通屏不出现这一区',fBump:'搜索回车直接划整桌',fBumpWarn:'高风险：回车即划单，误触无法撤销',fSound:'提示音',fPrint:'划单打印',fWarnAt:'预警阈值',fLateAt:'超时阈值',fontS:'小 S',fontM:'中 M',fontL:'大 L',sumNote:'挂高处远看，纯卡片缺总数感',layNote:'按档口分栏＝第四种视图机制，要动 ActiveView'},
+
+  /* 粤语（yue-Hant-HK）—— 繁体正字 + 港式餐饮用词。
+     注意不是「把简体 zh 转繁体」就算完：词汇层面大量不同
+     （白飯/併檯/走單/起菜/少冰/走青），否则港澳同事会读得别扭。
+     长度梯度约 1.15：繁体笔画多、单字视觉宽度略大于简体，
+     但仍是 CJK，远短于印欧语，Clamp 策略沿用中文档即可。 */
+  yue:{brand:'備餐站 1',sub:'熱菜備餐 · 檔口視圖',tabTable:'檯',tabMerge:'併菜',tabSingle:'單菜',
+    fAll:'全部',fUrge:'催菜',fTimeout:'超時',fHold:'等叫',search:'搜尋菜名 / 檯號 / 單號',
+    kbNum:'數字',kbAbc:'字母',kbClear:'清空',kbSpace:'空格',kbGo:'確認搜尋',
+    kbHint:'輸入後會顯示結果',kbNone:'搵唔到',kbHit:'搵到 {n} 項',
+    handover:'交更',myOrders:'我嘅劃單',logout:'登出',biz:'營業日 10',
+    call:'叫號',clear:'劃單',prev:'上一頁',next:'下一頁',
+    timeoutN:'超時 {n} 檯',urgeN:'催菜 2 檯',totalN:'共 {n} 檯',page:'第 {n} / {m} 頁',
+    timeoutDish:'超時 {n} 道',totalDish:'共 {n} 道菜',totalSingle:'共 {n} 道待出',todo:'待整',mWarn:'就快超時',
+    dishes:'{n} 道',unit:'份',more:'+{n} 道',
+    mergeTitle:'併菜 · 按菜式歸類',mergeSel:'已揀 {n} 道',batch:'批量劃單',singleKick:'出菜',
+    singleTitle:'單菜 · 按出菜先後',sTable:'檯號',sDish:'菜式',sQty:'數量',sWay:'做法',sWait:'等候',sFlag:'標記',sOp:'動作',
+    loginTitle:'備餐站登入',loginSub:'請輸入員工編號同 PIN 碼',empNo:'員工編號',pin:'PIN 碼',loginBtn:'登 入',lgLang:'語言',empPh:'未輸入',pinPh:'最少 4 位',loginErr:'請輸入員工編號，PIN 最少 4 位',loginOk:'✓ 登入成功',npClear:'清除',
+    shift:'早更 · 08:00–16:00',ver:'v2.7.1 · 滿版自適應',
+    wait:'等候',sel:'已揀',cfgTitle:'顯示同排版',login:'登入',fsApplied:'✓ 已套用到三個視圖',themeA:'A · 夜航',themeB:'B · 晨光',
+    d_kungpao:'宮保雞丁',d_rice:'白飯',d_soup:'例湯',d_cucumber:'拍青瓜',d_wuchan:'涼拌青瓜',
+    d_steamfish:'清蒸鱸魚',d_buddha:'佛跳牆',d_coke:'可樂',d_mabo:'麻婆豆腐',
+    d_waterfish:'水煮魚',d_cauliflower:'乾鍋椰菜花',d_egg:'萵筍炒蛋',d_beef:'番茄牛腩',
+    d_offal:'鮮麻青椒牛油鍋底配毛肚',d_shrimp:'蒜蓉粉絲蒸蝦',
+    t_mild:'微辣',t_peanut:'少花生',t_spicy:'加辣',t_ice:'凍',t_room:'室溫',t_med:'中辣',
+    t_hot:'特辣',t_hold:'等叫',t_serve:'起菜',
+    b_urgent:'加急',b_timeout:'超時',b_urge:'催',b_hold:'等叫',b_fire:'起菜',b_gift:'送',
+    b_join:'併檯',b_sun:'星期日',b_rush:'催菜',b_new:'新',
+    /* —— A-06 綜合屏 —— */
+    tabCombo:'綜合',sumTodo:'待整',sumLate:'超時',sumCross:'跨日',
+    st_hot:'熱菜',st_cold:'涼菜',st_dim:'點心',st_roast:'燒味',st_drink:'飲品',
+    layTitle:'排版',layGrid:'統一網格',layCols:'按檔口分欄',opTitle:'權限',opOn:'可操作',opOff:'唯讀',
+    roNote:'唯讀：卡尾成條收起、卡變矮（唔係變灰）',
+    comboTotal:'共 {n} 道', comboSum:'匯總條', tabSet:'設定',setTitle:'屏幕設定',setNote:'本頁允許捲動（作業畫面唯一例外）', fConfirm:'劃單要再確認',fHoldTop:'等叫菜自動置頂',fTagShow:'顯示做法同標記',fFloorSel:'本屏負責樓層',fStation:'所屬檔口',setSave:'確定',setCancel:'取消',gBasic:'基本',gDish:'菜式',gFloor:'廳面樓層',gGeneral:'一般',gTimeout:'超時',fLang:'介面語言',fCols:'每行卡片數',fRows:'每列行數',fFont:'顯示字級',fTheme:'視覺方案',fSuggest:'建議 {n}',fNoAuto:'只作提示，唔會自動改你填嘅值',fDb:'資料庫連線（只限 Master 本機）',fDbNote:'普通屏幕唔會出現呢一區',fBump:'搜尋 Enter 直接劃成檯',fBumpWarn:'高風險：一按 Enter 就劃單，撻錯冇得還原',fSound:'提示音',fPrint:'劃單列印',fWarnAt:'預警門檻',fLateAt:'超時門檻',fontS:'細 S',fontM:'中 M',fontL:'大 L',sumNote:'掛高處遠睇，純卡片欠總數感',layNote:'按檔口分欄＝第四種視圖機制，要改 ActiveView'},
+
+  en:{brand:'Prep Station 1',sub:'HOT LINE · STATION VIEW',tabTable:'Tables',tabMerge:'Merge',tabSingle:'Single',
+    fAll:'All',fUrge:'Urge',fTimeout:'Overdue',fHold:'On Hold',search:'Dish / Table / Order',
+    kbNum:'Num',kbAbc:'ABC',kbClear:'Clear',kbSpace:'Space',kbGo:'Search',
+    kbHint:'Matches appear here',kbNone:'No match',kbHit:'{n} found',
+    handover:'Handover',myOrders:'My Clears',logout:'Sign out',biz:'Day 10',
+    call:'Call',clear:'Clear',prev:'Previous',next:'Next',
+    timeoutN:'Overdue {n}',urgeN:'Urged 2',totalN:'{n} tables',page:'Page {n} of {m}',
+    timeoutDish:'{n} overdue',totalDish:'{n} dishes',totalSingle:'{n} to serve',todo:'TODO',mWarn:'Due soon',
+    dishes:'{n} items',unit:'pcs',more:'+{n} more',
+    mergeTitle:'Merge · Grouped by dish',mergeSel:'{n} selected',batch:'Batch clear',singleKick:'Serve',
+    singleTitle:'Single view · Serve order',sTable:'Table',sDish:'Dish',sQty:'Qty',sWay:'Prep',sWait:'Wait',sFlag:'Flags',sOp:'Action',
+    loginTitle:'Station sign-in',loginSub:'Enter employee ID and PIN',empNo:'Employee ID',pin:'PIN',loginBtn:'SIGN IN',lgLang:'Language',empPh:'Not entered',pinPh:'At least 4',loginErr:'Enter employee ID and a PIN of at least 4 digits',loginOk:'Signed in',npClear:'Clear',
+    shift:'Morning · 08:00–16:00',ver:'v2.7.1 · fluid layout',
+    wait:'Wait',sel:'Selected',cfgTitle:'Layout',login:'Sign-in',fsApplied:'✓ Applied to all views',themeA:'A · Night',themeB:'B · Daylight',
+    d_kungpao:'Kung Pao Chicken',d_rice:'Steamed Rice',d_soup:'Soup of the Day',d_cucumber:'Smashed Cucumber',
+    d_wuchan:'Cucumber Salad',d_steamfish:'Steamed Sea Bass',d_buddha:'Buddha Jumps Wall',
+    d_coke:'Cola',d_mabo:'Mapo Tofu',d_waterfish:'Fish in Chili Oil',d_cauliflower:'Dry-Pot Cauliflower',
+    d_egg:'Egg with Lettuce',d_beef:'Beef Brisket & Tomato',d_offal:'Numbing Pepper Beef Tallow Pot with Tripe',
+    d_shrimp:'Garlic Vermicelli Prawns',
+    t_mild:'Mild',t_peanut:'Less peanut',t_spicy:'Extra spicy',t_ice:'Iced',t_room:'Room temp',t_med:'Medium',
+    t_hot:'Very hot',t_hold:'On hold',t_serve:'Serve',
+    b_urgent:'RUSH',b_timeout:'LATE',b_urge:'URGE',b_hold:'HOLD',b_fire:'FIRE',b_gift:'GIFT',
+    b_join:'JOIN',b_sun:'SUN',b_rush:'RUSH',b_new:'NEW',
+    /* —— A-06 combo view —— */
+    tabCombo:'Combo',sumTodo:'To make',sumLate:'Overdue',sumCross:'Cross-day',
+    st_hot:'Hot line',st_cold:'Cold dish',st_dim:'Dim sum',st_roast:'Roast',st_drink:'Drinks',
+    layTitle:'Layout',layGrid:'One grid',layCols:'By station',opTitle:'Rights',opOn:'Operable',opOff:'Read-only',
+    roNote:'Read-only: the card footer is removed entirely, not greyed out',
+    comboTotal:'{n} items', comboSum:'Totals bar', tabSet:'Settings',setTitle:'Station settings',setNote:'This page may scroll (the only exception)', fConfirm:'Confirm before clearing',fHoldTop:'On-hold dishes float to top',fTagShow:'Show prep notes and flags',fFloorSel:'Floors served by this screen',fStation:'Station',setSave:'Save',setCancel:'Cancel',gBasic:'Basic',gDish:'Dishes',gFloor:'Floor and tables',gGeneral:'General',gTimeout:'Timeouts',fLang:'Language',fCols:'Cards per row',fRows:'Rows per column',fFont:'Text size',fTheme:'Visual theme',fSuggest:'Suggested {n}',fNoAuto:'Advisory only - never overwrites your value',fDb:'Database connection (Master machine only)',fDbNote:'Hidden on ordinary stations',fBump:'Enter in search clears the whole table',fBumpWarn:'High risk: one Enter clears the table, no undo',fSound:'Alert sound',fPrint:'Print on clear',fWarnAt:'Warn after',fLateAt:'Late after',fontS:'Small S',fontM:'Medium M',fontL:'Large L',sumNote:'Mounted high — pure cards lose the sense of total',layNote:'Per-station columns = a fourth view type, touches ActiveView'},
+
+  de:{brand:'Vorbereitung 1',sub:'WARMLINIE · STATION',tabTable:'Tische',tabMerge:'Zusammen',tabSingle:'Einzeln',
+    fAll:'Alle',fUrge:'Anmahnen',fTimeout:'Überfällig',fHold:'Zurückgestellt',search:'Gericht / Tisch / Bestellung',
+    kbNum:'Zahlen',kbAbc:'ABC',kbClear:'Löschen',kbSpace:'Leer',kbGo:'Suchen',
+    kbHint:'Treffer erscheinen hier',kbNone:'Kein Treffer',kbHit:'{n} Treffer',
+    handover:'Übergabe',myOrders:'Meine Erledigten',logout:'Abmelden',biz:'Tag 10',
+    call:'Rufen',clear:'Erledigt',prev:'Zurück',next:'Weiter',
+    timeoutN:'Überfällig {n}',urgeN:'Angemahnt 2',totalN:'{n} Tische',page:'Seite {n} von {m}',
+    timeoutDish:'{n} überfällig',totalDish:'{n} Gerichte',totalSingle:'{n} offen',todo:'OFFEN',mWarn:'Bald fällig',
+    dishes:'{n} Posten',unit:'Stk',more:'+{n} weitere',
+    mergeTitle:'Zusammenfassung · nach Gericht',mergeSel:'{n} ausgewählt',batch:'Sammel-Erledigt',singleKick:'Servieren',
+    singleTitle:'Einzelansicht · Servierreihenfolge',sTable:'Tisch',sDish:'Gericht',sQty:'Menge',sWay:'Zubereitung',sWait:'Wartezeit',sFlag:'Markierung',sOp:'Aktion',
+    loginTitle:'Anmeldung Vorbereitung',loginSub:'Personalnummer und PIN eingeben',empNo:'Personalnummer',pin:'PIN',loginBtn:'ANMELDEN',lgLang:'Sprache',empPh:'Nicht eingegeben',pinPh:'Mind. 4',loginErr:'Personalnummer und PIN mit mindestens 4 Zeichen eingeben',loginOk:'Angemeldet',npClear:'Löschen',
+    shift:'Frühschicht · 08:00–16:00',ver:'v2.7.1 · fließendes Layout',
+    wait:'Wartezeit',sel:'Ausgewählt',cfgTitle:'Layout',login:'Anmeldung',fsApplied:'✓ Auf alle Ansichten übernommen',themeA:'A · Nacht',themeB:'B · Tageslicht',
+    d_kungpao:'Kung-Pao-Hähnchen',d_rice:'Gedämpfter Reis',d_soup:'Tagessuppe',d_cucumber:'Gurkensalat nach Art des Hauses',
+    d_wuchan:'Gurken-Möhren-Salat',d_steamfish:'Gedämpfter Wolfsbarsch',d_buddha:'Buddha-Sprungsuppe',
+    d_coke:'Cola',d_mabo:'Mapo-Tofu',d_waterfish:'Fisch in Chiliöl',d_cauliflower:'Blumenkohl im Tontopf',
+    d_egg:'Rührei mit Kopfsalat',d_beef:'Rinderbrust mit Tomaten',d_offal:'Betäubender Pfeffer-Rinderfett-Topf mit Pansen',
+    d_shrimp:'Garnelen mit Glasnudeln und Knoblauch',
+    t_mild:'Mild',t_peanut:'Wenig Erdnuss',t_spicy:'Extra scharf',t_ice:'Mit Eis',t_room:'Zimmertemperatur',t_med:'Mittelscharf',
+    t_hot:'Sehr scharf',t_hold:'Zurückgestellt',t_serve:'Servieren',
+    b_urgent:'EILT',b_timeout:'SPÄT',b_urge:'MAHNEN',b_hold:'HALT',b_fire:'SERVIEREN',b_gift:'GESCHENK',
+    b_join:'ZUSAMMEN',b_sun:'SO',b_rush:'EILT',b_new:'NEU',
+    /* —— A-06 Kombiansicht —— */
+    tabCombo:'Kombi',sumTodo:'Offen',sumLate:'Überfällig',sumCross:'Tagwechsel',
+    st_hot:'Warme Küche',st_cold:'Kalte Küche',st_dim:'Dim Sum',st_roast:'Braten',st_drink:'Getränke',
+    layTitle:'Layout',layGrid:'Ein Raster',layCols:'Nach Station',opTitle:'Rechte',opOn:'Bedienbar',opOff:'Nur Lesen',
+    roNote:'Nur Lesen: Fußzeile der Karte wird entfernt, nicht ausgegraut',
+    comboTotal:'{n} Posten', comboSum:'Summenleiste', tabSet:'Einstellungen',setTitle:'Stationseinstellungen',setNote:'Diese Seite darf scrollen (einzige Ausnahme)', fConfirm:'Vor dem Schliessen bestaetigen',fHoldTop:'Zurueckgestellte nach oben',fTagShow:'Zubereitung und Markierungen zeigen',fFloorSel:'Von diesem Bildschirm bediente Etagen',fStation:'Station',setSave:'Speichern',setCancel:'Abbrechen',gBasic:'Allgemein',gDish:'Gerichte',gFloor:'Saal und Tische',gGeneral:'Sonstiges',gTimeout:'Fristen',fLang:'Sprache',fCols:'Karten je Zeile',fRows:'Zeilen je Spalte',fFont:'Schriftgroesse',fTheme:'Farbschema',fSuggest:'Empfohlen {n}',fNoAuto:'Nur Hinweis - ueberschreibt Ihren Wert nicht',fDb:'Datenbankverbindung (nur Master-Rechner)',fDbNote:'Auf normalen Stationen nicht sichtbar',fBump:'Enter in der Suche schliesst den ganzen Tisch',fBumpWarn:'Hohes Risiko: ein Enter schliesst den Tisch, kein Rueckgaengig',fSound:'Signalton',fPrint:'Druck beim Schliessen',fWarnAt:'Warnung nach',fLateAt:'Ueberfaellig nach',fontS:'Klein S',fontM:'Mittel M',fontL:'Gross L',sumNote:'Hoch montiert — reine Karten verlieren das Totalgefühl',layNote:'Spalten je Station = vierter Ansichtstyp, berührt ActiveView'},
+
+  ru:{brand:'Станция 1',sub:'ГОРЯЧИЙ ЦЕХ · ПОСТ',tabTable:'Столы',tabMerge:'Объединение',tabSingle:'Отдельно',
+    fAll:'Все',fUrge:'Торопить',fTimeout:'Просрочено',fHold:'Отложено',search:'Блюдо / Стол / Заказ',
+    kbNum:'Цифры',kbAbc:'Буквы',kbClear:'Очистить',kbSpace:'Пробел',kbGo:'Найти',
+    kbHint:'Совпадения появятся здесь',kbNone:'Совпадений нет',kbHit:'Найдено: {n}',
+    handover:'Передача',myOrders:'Мои закрытые',logout:'Выход',biz:'День 10',
+    call:'Вызов',clear:'Готово',prev:'Назад',next:'Далее',
+    timeoutN:'Просрочено {n}',urgeN:'Торопят 2',totalN:'{n} столов',page:'Стр. {n} из {m}',
+    timeoutDish:'{n} просрочено',totalDish:'{n} блюд',totalSingle:'{n} к выдаче',todo:'ГОТОВИТЬ',mWarn:'Скоро срок',
+    dishes:'{n} поз.',unit:'шт',more:'+{n} ещё',
+    mergeTitle:'Объединение · по блюдам',mergeSel:'Выбрано {n}',batch:'Закрыть выбранные',singleKick:'Подать',
+    singleTitle:'Отдельный вид · порядок подачи',sTable:'Стол',sDish:'Блюдо',sQty:'Кол-во',sWay:'Приготовление',sWait:'Ожидание',sFlag:'Метки',sOp:'Действие',
+    loginTitle:'Вход на станцию',loginSub:'Введите табельный номер и PIN',empNo:'Табельный номер',pin:'PIN-код',loginBtn:'ВОЙТИ',lgLang:'Язык',empPh:'Не введено',pinPh:'Минимум 4',loginErr:'Введите табельный номер и PIN минимум из 4 символов',loginOk:'Вход выполнен',npClear:'Очистить',
+    shift:'Утренняя смена · 08:00–16:00',ver:'v2.7.1 · адаптивная вёрстка',
+    wait:'Ожидание',sel:'Выбрано',cfgTitle:'Макет',login:'Вход',fsApplied:'✓ Применено ко всем видам',themeA:'A · Ночь',themeB:'B · День',
+    d_kungpao:'Курица Кунг-Пао',d_rice:'Отварной рис',d_soup:'Суп дня',d_cucumber:'Салат из огурцов по-домашнему',
+    d_wuchan:'Салат из огурцов с морковью',d_steamfish:'Сибас на пару',d_buddha:'Суп «Будда через стену»',
+    d_coke:'Кола',d_mabo:'Тофу Мапо',d_waterfish:'Рыба в остром масле',d_cauliflower:'Цветная капуста в горшочке',
+    d_egg:'Яичница с салатом',d_beef:'Говяжья грудинка с томатами',d_offal:'Жгучий перечный бульон с говяжьим жиром и требухой',
+    d_shrimp:'Креветки с рисовой лапшой и чесноком',
+    t_mild:'Слабоостро',t_peanut:'Меньше арахиса',t_spicy:'Острее',t_ice:'Со льдом',t_room:'Комнатной температуры',t_med:'Среднеостро',
+    t_hot:'Очень остро',t_hold:'Отложено',t_serve:'Подавать',
+    b_urgent:'СРОЧНО',b_timeout:'ОПОЗД',b_urge:'ТОРОПЯТ',b_hold:'ОТЛОЖ',b_fire:'ПОДАЧА',b_gift:'ПОДАРОК',
+    b_join:'СЛИЯНИЕ',b_sun:'ВС',b_rush:'СРОЧНО',b_new:'НОВОЕ',
+    /* —— A-06 сводный экран —— */
+    tabCombo:'Сводно',sumTodo:'К готовке',sumLate:'Просрочено',sumCross:'Через день',
+    st_hot:'Горячий цех',st_cold:'Холодный цех',st_dim:'Дим-самы',st_roast:'Жарка',st_drink:'Напитки',
+    layTitle:'Раскладка',layGrid:'Общая сетка',layCols:'По станциям',opTitle:'Права',opOn:'С управлением',opOff:'Только чтение',
+    roNote:'Только чтение: подвал карточки убирается полностью, а не гаснет',
+    comboTotal:'{n} поз.', comboSum:'Итоговая панель', tabSet:'Настройки',setTitle:'Настройки станции',setNote:'Эта страница может прокручиваться (единственное исключение)', fConfirm:'Подтверждение перед закрытием',fHoldTop:'Отложенные блюда сверху',fTagShow:'Показывать приготовление и метки',fFloorSel:'Этажи, которые обслуживает экран',fStation:'Станция',setSave:'Сохранить',setCancel:'Отмена',gBasic:'Основные',gDish:'Блюда',gFloor:'Зал и столы',gGeneral:'Общие',gTimeout:'Сроки',fLang:'Язык',fCols:'Карточек в строке',fRows:'Строк в столбце',fFont:'Размер шрифта',fTheme:'Тема',fSuggest:'Рекомендуемо {n}',fNoAuto:'Только подсказка - ваше значение не перезаписывается',fDb:'Подключение к БД (только на машине Master)',fDbNote:'На обычных станциях не показывается',fBump:'Enter в поиске закрывает весь стол',fBumpWarn:'Высокий риск: один Enter закрывает стол, отмены нет',fSound:'Звуковой сигнал',fPrint:'Печать при закрытии',fWarnAt:'Предупреждение через',fLateAt:'Просрочка через',fontS:'Мелкий S',fontM:'Средний M',fontL:'Крупный L',sumNote:'Экран высоко — одни карточки теряют ощущение итога',layNote:'Колонки по станциям = четвёртый тип вида, затрагивает ActiveView'},
+
+  ar:{brand:'محطة التحضير 1',sub:'الخط الساخن · عرض المحطة',tabTable:'الطاولات',tabMerge:'الدمج',tabSingle:'منفرد',
+    fAll:'الكل',fUrge:'مستعجل',fTimeout:'متأخر',fHold:'معلّق',search:'طبق / طاولة / طلب',
+    kbNum:'أرقام',kbAbc:'حروف',kbClear:'مسح',kbSpace:'مسافة',kbGo:'بحث',
+    kbHint:'ستظهر النتائج هنا',kbNone:'لا نتائج',kbHit:'النتائج: {n}',
+    handover:'تسليم',myOrders:'ما أنجزته',logout:'خروج',biz:'اليوم 10',
+    call:'نداء',clear:'تم',prev:'السابق',next:'التالي',
+    timeoutN:'متأخر {n}',urgeN:'مستعجل 2',totalN:'{n} طاولة',page:'صفحة {n} من {m}',
+    timeoutDish:'متأخر {n}',totalDish:'{n} طبق',totalSingle:'{n} بانتظار التقديم',todo:'قيد التحضير',mWarn:'قريب التأخير',
+    dishes:'{n} أصناف',unit:'حصة',more:'+{n} أخرى',
+    mergeTitle:'الدمج · حسب الطبق',mergeSel:'محدد {n}',batch:'إنجاز المحدد',singleKick:'تقديم',
+    singleTitle:'العرض المنفرد · ترتيب التقديم',sTable:'الطاولة',sDish:'الطبق',sQty:'الكمية',sWay:'التحضير',sWait:'الانتظار',sFlag:'العلامات',sOp:'إجراء',
+    loginTitle:'تسجيل الدخول',loginSub:'أدخل رقم الموظف والرمز السري',empNo:'رقم الموظف',pin:'الرمز السري',loginBtn:'دخول',lgLang:'اللغة',empPh:'لم يُدخل',pinPh:'4 على الأقل',loginErr:'أدخل رقم الموظف والرمز السري (4 على الأقل)',loginOk:'تم الدخول',npClear:'مسح',
+    shift:'الوردية الصباحية · 08:00–16:00',ver:'v2.7.1 · تخطيط مرن',
+    wait:'الانتظار',sel:'محدد',cfgTitle:'التخطيط',login:'الدخول',fsApplied:'✓ طُبِّق على كل العروض',themeA:'A · ليلي',themeB:'B · نهاري',
+    d_kungpao:'دجاج كونغ باو',d_rice:'أرز مطهو',d_soup:'شوربة اليوم',d_cucumber:'سلطة خيار مهروس',
+    d_wuchan:'سلطة خيار وجزر',d_steamfish:'قاروص مطهو بالبخار',d_buddha:'حساء بوذا',
+    d_coke:'كولا',d_mabo:'توفو مابو',d_waterfish:'سمك بالزيت الحار',d_cauliflower:'قرنبيط بالطنجرة',
+    d_egg:'بيض مخفوق بالخس',d_beef:'لحم بقري بالطماطم',d_offal:'حساء فلفل لاذع بدهن البقر والكرشة',
+    d_shrimp:'روبيان مع الشعيرية والثوم',
+    t_mild:'حار قليلاً',t_peanut:'فول سوداني أقل',t_spicy:'حار زيادة',t_ice:'مثلج',t_room:'بدرجة الغرفة',t_med:'حار وسط',
+    t_hot:'حار جداً',t_hold:'معلّق',t_serve:'تقديم',
+    b_urgent:'عاجل',b_timeout:'متأخر',b_urge:'استعجال',b_hold:'معلّق',b_fire:'تقديم',b_gift:'هدية',
+    b_join:'دمج',b_sun:'أحد',b_rush:'عاجل',b_new:'جديد',
+    /* —— A-06 الشاشة الشاملة —— */
+    tabCombo:'شامل',sumTodo:'قيد التحضير',sumLate:'متأخر',sumCross:'عبر اليوم',
+    st_hot:'أطباق ساخنة',st_cold:'أطباق باردة',st_dim:'معجنات',st_roast:'مشويات',st_drink:'مشروبات',
+    layTitle:'التخطيط',layGrid:'شبكة واحدة',layCols:'حسب المحطة',opTitle:'الصلاحيات',opOn:'قابل للتشغيل',opOff:'للقراءة فقط',
+    roNote:'للقراءة فقط: يُحذف تذييل البطاقة بالكامل، لا يصبح رمادياً',
+    comboTotal:'{n} صنفاً', comboSum:'شريط المجموع', tabSet:'الإعدادات',setTitle:'إعدادات المحطة',setNote:'هذه الصفحة تسمح بالتمرير (الاستثناء الوحيد)', fConfirm:'تأكيد قبل الإنهاء',fHoldTop:'الأطباق المعلّقة في الأعلى',fTagShow:'إظهار التحضير والعلامات',fFloorSel:'الطوابق التي تخدمها هذه الشاشة',fStation:'المحطة',setSave:'حفظ',setCancel:'إلغاء',gBasic:'أساسية',gDish:'الأطباق',gFloor:'الصالة والطاولات',gGeneral:'عامة',gTimeout:'المهل',fLang:'اللغة',fCols:'بطاقات في الصف',fRows:'صفوف في العمود',fFont:'حجم الخط',fTheme:'المظهر',fSuggest:'المقترح {n}',fNoAuto:'تلميح فقط - لا تُستبدل القيمة التي أدخلتها',fDb:'اتصال قاعدة البيانات (على جهاز Master فقط)',fDbNote:'لا يظهر على المحطات العادية',fBump:'Enter في البحث يُنهي الطاولة كاملة',fBumpWarn:'خطر عالٍ: ضغطة Enter واحدة تُنهي الطاولة بلا تراجع',fSound:'صوت التنبيه',fPrint:'طباعة عند الإنهاء',fWarnAt:'تحذير بعد',fLateAt:'تأخير بعد',fontS:'صغير S',fontM:'متوسط M',fontL:'كبير L',sumNote:'معلّقة في الأعلى — البطاقات وحدها تفقد الإحساس بالمجموع',layNote:'أعمدة لكل محطة = نوع عرض رابع، يؤثر على ActiveView'}
+};
+const t = k => (T[S.lang] && T[S.lang][k]) || T.zh[k] || k;
+const fmt = (s,o) => s.replace(/\{(\w+)\}/g,(_,k)=>o[k]??'');
+
+/* ============================================================================
+   2. 数据
+   ============================================================================ */
+const TABLES = [
+  {no:'A05',meals:['午'],cnt:4,done:2,wait:'21:40',tone:'timeout',flags:['b_timeout'],
+   dishes:[{d:'d_kungpao',q:2,w:'21:40',tone:'timeout',tags:['t_mild','t_peanut'],flag:'b_urgent'},
+           {d:'d_rice',q:2,w:'21:12',tone:'timeout'},
+           {d:'d_soup',q:2,w:'08:05',flag:'b_gift'},
+           {d:'d_mabo',q:1,w:'06:40',tone:'warn'}]},
+  {no:'A06',meals:['午'],cnt:3,done:2,wait:'04:15',tone:'warn',flags:['b_hold'],
+   dishes:[{d:'d_cucumber',q:1,w:'04:15',tone:'warn',flag:'b_hold'},
+           {d:'d_wuchan',q:3,w:'03:40',tags:['t_spicy']},
+           {d:'d_steamfish',q:1,w:'00:00',flag:'b_hold'}]},
+  {no:'C1+A07',meals:['午','晚'],cnt:4,done:6,wait:'25:00',tone:'cross',flags:['b_sun','b_join'],
+   dishes:[{d:'d_buddha',q:1,w:'25:00',tone:'timeout'},
+           {d:'d_rice',q:4,w:'12:30'},
+           {d:'d_soup',q:4,w:'12:30',flag:'b_fire'},
+           {d:'d_waterfish',q:2,w:'09:10',tone:'timeout'}]},
+  {no:'ka021',meals:['午'],cnt:3,done:3,wait:'01:57',tone:'',
+   dishes:[{d:'d_coke',q:1,w:'02:00',tags:['t_ice']},
+           {d:'d_coke',q:1,w:'02:00',tags:['t_room']},
+           {d:'d_offal',q:1,w:'01:57',tags:['t_med']}]},
+  {no:'ka041',meals:['午'],cnt:2,done:1,wait:'01:39',tone:'',
+   dishes:[{d:'d_egg',q:3,w:'01:39'},{d:'d_beef',q:1,w:'01:20'}]},
+  {no:'B02',meals:['午'],cnt:4,done:8,wait:'06:22',tone:'',flags:['b_rush'],
+   dishes:[{d:'d_waterfish',q:2,w:'06:22',tags:['t_hot'],flag:'b_urge'},
+           {d:'d_cauliflower',q:1,w:'05:10'},
+           {d:'d_rice',q:8,w:'05:00'},
+           {d:'d_shrimp',q:2,w:'04:30',tone:'warn'}]},
+  {no:'A11',meals:['晚'],cnt:2,done:0,wait:'00:52',tone:'',flags:['b_new'],
+   dishes:[{d:'d_kungpao',q:1,w:'00:52',tags:['t_spicy']},{d:'d_rice',q:1,w:'00:45'}]},
+  {no:'C03',meals:['晚'],cnt:5,done:0,wait:'03:18',tone:'',flags:[],
+   dishes:[{d:'d_mabo',q:2,w:'03:18',tags:['t_med']},{d:'d_beef',q:1,w:'02:50'},
+           {d:'d_egg',q:1,w:'02:40'},{d:'d_soup',q:3,w:'02:10'},{d:'d_rice',q:3,w:'02:10'}]},
+  {no:'B07',meals:['晚'],cnt:1,done:0,wait:'00:28',tone:'',flags:[],
+   dishes:[{d:'d_steamfish',q:1,w:'00:28',tags:['t_serve']}]},
+  {no:'ka008',meals:['午'],cnt:3,done:1,wait:'07:44',tone:'warn',flags:['b_urge'],
+   dishes:[{d:'d_buddha',q:1,w:'07:44',tone:'warn'},{d:'d_cucumber',q:2,w:'06:20'},{d:'d_coke',q:3,w:'06:00',tags:['t_ice']}]},
+  {no:'A02',meals:['午'],cnt:2,done:0,wait:'02:05',tone:'hold',flags:['b_hold'],
+   dishes:[{d:'d_shrimp',q:1,w:'02:05',tone:'hold',flag:'b_hold'},{d:'d_rice',q:2,w:'02:00',tone:'hold'}]},
+  {no:'C09',meals:['晚'],cnt:3,done:0,wait:'01:12',tone:'',flags:[],
+   dishes:[{d:'d_waterfish',q:1,w:'01:12',tags:['t_hot']},{d:'d_cauliflower',q:1,w:'01:05'},{d:'d_rice',q:4,w:'01:00'}]}
+];
+
+/* 合菜视图：按菜品聚合（一道菜多桌） */
+const MERGES = [
+  {d:'d_kungpao',q:5,tone:'timeout',tags:['t_mild'],tables:3},
+  {d:'d_rice',q:22,tone:'',tags:[],tables:9},
+  {d:'d_waterfish',q:4,tone:'timeout',tags:['t_hot'],tables:3},
+  {d:'d_buddha',q:2,tone:'warn',tags:[],tables:2},
+  {d:'d_mabo',q:3,tone:'',tags:['t_med'],tables:2},
+  {d:'d_egg',q:4,tone:'',tags:[],tables:2},
+  {d:'d_cauliflower',q:2,tone:'warn',tags:[],tables:2},
+  {d:'d_beef',q:2,tone:'',tags:[],tables:2},
+  {d:'d_cucumber',q:3,tone:'',tags:[],tables:2},
+  {d:'d_soup',q:9,tone:'',tags:[],tables:4},
+  {d:'d_coke',q:5,tone:'',tags:['t_ice'],tables:3},
+  {d:'d_steamfish',q:1,tone:'hold',tags:['t_hold'],tables:1}
+];
+
+/* 单菜视图：一道菜 × 一个桌号，按等待时长倒序（最老的先出） */
+const SINGLES = [
+  {tb:'C1+A07', d:'d_buddha',    q:1, tags:[],                w:'25:00', tone:'timeout'},
+  {tb:'A05',    d:'d_kungpao',   q:2, tags:['t_mild','t_peanut'], w:'21:40', tone:'timeout'},
+  {tb:'ka008',  d:'d_buddha',    q:1, tags:[],                w:'07:44', tone:'warn'},
+  {tb:'B02',    d:'d_waterfish', q:2, tags:['t_hot'],         w:'06:22', tone:'warn'},
+  {tb:'ka021',  d:'d_offal',     q:1, tags:['t_med'],         w:'01:57'},
+  {tb:'A11',    d:'d_kungpao',   q:1, tags:['t_spicy'],       w:'00:52'},
+  {tb:'B07',    d:'d_steamfish', q:1, tags:['t_serve'],       w:'00:28'},
+  {tb:'A02',    d:'d_shrimp',    q:1, tags:['t_hold'],        w:'02:05', tone:'hold'},
+  {tb:'A06',    d:'d_cucumber',  q:1, tags:[],                w:'04:15', tone:'warn'},
+  {tb:'C03',    d:'d_mabo',      q:2, tags:['t_med'],         w:'03:18'},
+  {tb:'ka041',  d:'d_egg',       q:3, tags:[],                w:'01:39'},
+  {tb:'C09',    d:'d_waterfish', q:1, tags:['t_hot'],         w:'01:12'},
+  {tb:'A05',    d:'d_rice',      q:2, tags:[],                w:'21:12', tone:'timeout'},
+  {tb:'A06',    d:'d_wuchan',    q:3, tags:['t_spicy'],       w:'03:40'},
+  {tb:'C1+A07', d:'d_waterfish', q:2, tags:[],                w:'09:10', tone:'timeout'},
+  {tb:'ka021',  d:'d_coke',      q:1, tags:['t_ice'],         w:'02:00'},
+  {tb:'B02',    d:'d_cauliflower',q:1,tags:[],                w:'05:10'},
+  {tb:'A11',    d:'d_rice',      q:1, tags:[],                w:'00:45'},
+  {tb:'C03',    d:'d_beef',      q:1, tags:[],                w:'02:50'},
+  {tb:'ka008',  d:'d_cucumber',  q:2, tags:[],                w:'06:20'},
+  {tb:'C09',    d:'d_rice',      q:4, tags:[],                w:'01:00'},
+  {tb:'A05',    d:'d_soup',      q:2, tags:[],                w:'08:05', gift:true},
+  {tb:'B02',    d:'d_shrimp',    q:2, tags:[],                w:'04:30', tone:'warn'},
+  {tb:'A02',    d:'d_rice',      q:2, tags:[],                w:'02:00', tone:'hold'}
+];
+
+/* 综合屏（A-06）：多档口混合 —— 这是它与三视图最大的区别。
+   同一屏里混着 热菜/凉菜/面点/烧腊/饮品 五个档口，师傅必须能一眼分出「这道该谁做」，
+   所以每条数据都带 st（档口）。数据刻意选了「同一道菜出现在两个档口」的情况
+   （如米饭既在面点也在热菜），用来验证档口标签是不是真的必要。 */
+const STATIONS = ['st_hot','st_cold','st_dim','st_roast','st_drink'];
+const COMBOS = [
+  {tb:'A05',    d:'d_kungpao',    q:2, st:'st_hot',   w:'21:40', tone:'timeout', tags:['t_mild']},
+  {tb:'ka021',  d:'d_offal',      q:1, st:'st_hot',   w:'01:57', tags:['t_med']},
+  {tb:'C1+A07', d:'d_buddha',     q:1, st:'st_hot',   w:'25:00', tone:'timeout', cross:true},
+  {tb:'B02',    d:'d_waterfish',  q:2, st:'st_hot',   w:'06:22', tone:'warn',   tags:['t_hot']},
+  {tb:'C03',    d:'d_mabo',       q:2, st:'st_hot',   w:'03:18', tags:['t_med']},
+  {tb:'A11',    d:'d_beef',       q:1, st:'st_hot',   w:'02:50'},
+  {tb:'A06',    d:'d_cucumber',   q:1, st:'st_cold',  w:'04:15', tone:'warn'},
+  {tb:'A06',    d:'d_wuchan',     q:3, st:'st_cold',  w:'03:40', tags:['t_spicy']},
+  {tb:'ka008',  d:'d_cucumber',   q:2, st:'st_cold',  w:'06:20'},
+  {tb:'B07',    d:'d_steamfish',  q:1, st:'st_cold',  w:'00:28', tags:['t_serve']},
+  {tb:'C09',    d:'d_shrimp',     q:1, st:'st_cold',  w:'01:12', tone:'warn'},
+  {tb:'ka041',  d:'d_rice',       q:3, st:'st_dim',   w:'01:39'},
+  {tb:'C09',    d:'d_rice',       q:4, st:'st_dim',   w:'01:00'},
+  {tb:'A11',    d:'d_rice',       q:1, st:'st_dim',   w:'00:45'},
+  {tb:'A05',    d:'d_rice',       q:2, st:'st_dim',   w:'21:12', tone:'timeout'},
+  {tb:'B02',    d:'d_soup',       q:2, st:'st_dim',   w:'08:05', gift:true},
+  {tb:'ka008',  d:'d_shrimp',     q:1, st:'st_roast', w:'07:44', tone:'warn'},
+  {tb:'C1+A07', d:'d_waterfish',  q:2, st:'st_roast', w:'09:10', tone:'timeout'},
+  {tb:'A02',    d:'d_shrimp',     q:2, st:'st_roast', w:'04:30', tone:'warn'},
+  {tb:'B02',    d:'d_cauliflower',q:1, st:'st_roast', w:'05:10'},
+  {tb:'ka021',  d:'d_coke',       q:1, st:'st_drink', w:'02:00', tags:['t_ice']},
+  {tb:'C03',    d:'d_coke',       q:3, st:'st_drink', w:'00:38'},
+  {tb:'A02',    d:'d_rice',       q:2, st:'st_drink', w:'02:00', tone:'hold'},
+  {tb:'ka041',  d:'d_soup',       q:1, st:'st_drink', w:'00:22'}
+];
+/* 综合屏是「信息量最大」的一屏：24 条撑不满 8×6，补到 48 条才能验证
+   「满屏 + 多档口混合」时还读不读得清 —— 这正是条目 4 要回答的问题。 */
+[['B11','d_kungpao',1,'st_hot','00:52','',['t_spicy']],
+ ['B11','d_rice',2,'st_dim','00:50','',[]],
+ ['C12','d_waterfish',1,'st_hot','03:22','warn',['t_med']],
+ ['C12','d_coke',2,'st_drink','01:05','',['t_room']],
+ ['D01','d_buddha',1,'st_hot','11:30','timeout',[]],
+ ['D01','d_soup',1,'st_dim','11:28','timeout',[]],
+ ['D02','d_mabo',2,'st_hot','02:18','',['t_med']],
+ ['D02','d_rice',2,'st_dim','02:16','',[]],
+ ['E03','d_steamfish',1,'st_cold','05:40','warn',[]],
+ ['E03','d_cucumber',1,'st_cold','05:38','warn',['t_peanut']],
+ ['E04','d_cauliflower',1,'st_roast','04:02','',[]],
+ ['E04','d_beef',1,'st_hot','03:58','',[]],
+ ['F05','d_shrimp',2,'st_roast','02:47','',['t_serve']],
+ ['F05','d_coke',2,'st_drink','00:30','',['t_ice']],
+ ['F06','d_egg',1,'st_hot','01:44','',[]],
+ ['F06','d_rice',1,'st_dim','01:42','',[]],
+ ['ka055','d_offal',1,'st_hot','08:12','timeout',['t_hot']],
+ ['ka055','d_wuchan',2,'st_cold','08:10','timeout',[]],
+ ['ka056','d_kungpao',3,'st_hot','01:20','',[]],
+ ['ka056','d_soup',3,'st_dim','01:18','',[]],
+ ['G07','d_steamfish',1,'st_cold','06:55','warn',[]],
+ ['G07','d_buddha',1,'st_hot','06:52','warn',[]],
+ ['G08','d_mabo',1,'st_hot','00:48','',['t_mild']],
+ ['G08','d_coke',1,'st_drink','00:46','',[]]
+].forEach(([tb,d,q,st,w,tone,tags])=> COMBOS.push({tb,d,q,st,w,tone,tags}));
+
+/* ============================================================================
+   3. 工具
+   ============================================================================ */
+const $ = s => document.querySelector(s);
+const el = (tag, cls, html) => { const n=document.createElement(tag); if(cls) n.className=cls; if(html!=null) n.innerHTML=html; return n; };
+/* 三种视图共用一套分页：先决定「当前视图的数据源」，其余全部派生 */
+const itemsOf = v => v==='merge' ? MERGES : v==='single' ? SINGLES : v==='combo' ? COMBOS : TABLES;
+const pageSize = () => S.cols * S.rows;
+const pageCount = () => Math.max(1, Math.ceil(itemsOf(S.view).length / pageSize()));
+const pageSlice = arr => arr.slice(S.page*pageSize(), (S.page+1)*pageSize());
+const pageTables = () => pageSlice(TABLES);
+
+/* 网格实际渲染几行。
+   默认「严格等于行数设置」：卡片尺寸恒定，末页剩下的格子就空着 —— 行列数是密度（卡片大小）控制，
+   不是「把当前数据塞满屏幕」。厨师的手会形成肌肉记忆，卡片尺寸随数据量跳动比留白更糟。
+   S.fill=true 时才按实际条数收行、让剩下的卡片放大铺满。 */
+function gridRows(n){
+  const need = Math.max(1, Math.ceil(n / S.cols));
+  return S.fill ? Math.min(S.rows, need) : S.rows;
+}
+/* 把行数写进网格：三视图共用，保证「行数」永远按设置生效 */
+function applyGridRows(g, n){
+  if(g) g.style.gridTemplateRows = `repeat(${gridRows(n)}, minmax(0,1fr))`;
+}
+
+/* ============================================================================
+   4. 渲染 —— 桌台视图
+   ============================================================================ */
+function renderTable(){
+  const body = $('#body');
+  body.innerHTML = '';
+  const grid = el('div','grid');
+  grid.id='grid';
+  const list = pageTables();
+  list.forEach(tb => grid.appendChild(card(tb)));
+  applyGridRows(grid, list.length);
+  body.appendChild(grid);
+}
+
+function card(tb){
+  const c = el('div','tcard'+(tb.tone?` tone-${tb.tone}`:''));
+  c.dataset.no = tb.no;
+  c.tabIndex = 0;
+
+  // ---- 卡头
+  const hd = el('div','chd');
+  const dotCls = tb.tone==='timeout'||tb.tone==='cross' ? 'c-timeout' : tb.tone==='warn' ? 'c-warn' : '';
+  hd.appendChild(el('span','cdot '+dotCls));
+  hd.appendChild(el('span','ccnt', fmt(t('dishes'),{n:tb.cnt})));
+  const bd = el('div','cbadges');
+  (tb.flags||[]).forEach(f => {
+    // 徽标优先级：前 2 个必显，其余在空间不足时被裁掉（overflow:hidden）
+    const key = f.replace('b_','');
+    const cls = f==='b_timeout'||f==='b_rush'?'b-timeout':f==='b_hold'?'b-hold':f==='b_join'?'b-brand':f==='b_gift'?'b-gift':f==='b_fire'?'b-fire':'b-warn';
+    bd.appendChild(el('span','badge '+cls, t(f)));
+  });
+  if(tb.done>0) bd.appendChild(el('span','badge b-done', '✓'+tb.done));
+  hd.appendChild(bd);
+  const tn = el('div','ctno', tb.no);
+  // 桌号：≤7 字符正常大小，再长按 7/len 收敛，杜绝换行
+  const tnLen = [...tb.no].length;
+  tn.style.setProperty('--tn-f', Math.min(1, 7 / Math.max(1, tnLen)));
+  hd.appendChild(tn);
+  c.appendChild(hd);
+
+  // ---- 卡身：按可用高度动态决定显示几条，剩余折叠
+  const bdEl = el('div','cbd');
+  c.appendChild(bdEl);
+  // 先插入 DOM 后才能测量
+  requestAnimationFrame(()=>{ fillBody(bdEl, tb); });
+
+  // ---- 卡尾
+  const ft = el('div','cft');
+  const waitCls = tb.tone==='timeout'||tb.tone==='cross'?'timeout':tb.tone==='warn'?'warn':'';
+  ft.appendChild(el('span','cwait '+waitCls, '⏱ '+(tb.wait||'00:00')));
+  const acts = el('div','cacts');
+  const b1 = el('button','btn btn-ghost', t('call'));
+  const b2 = el('button','btn btn-primary', t('clear'));
+  b1.onclick = e => { e.stopPropagation(); flash(c,'b1'); };
+  b2.onclick = e => { e.stopPropagation(); clearTable(c,tb); };
+  acts.append(b1,b2);
+  ft.appendChild(acts);
+  c.appendChild(ft);
+
+  c.onclick = () => {}; // 整卡点击留给后续交互
+  return c;
+}
+
+/* 根据卡身实测高度，算出能放几条菜品行：行高弹性均分，把卡片填满 */
+function fillBody(box, tb){
+  if(!box.isConnected) return;
+  const cs = getComputedStyle(box);
+  const gap  = parseFloat(cs.rowGap) || 4;
+  const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+  const usable = Math.max(40, box.clientHeight - padY - 2);
+  const cardH = box.parentElement ? box.parentElement.clientHeight : usable;
+
+  // 最小舒适行高：跟卡片实高挂钩，保证 6 列×4 行时不至于挤成一条
+  let minRow = Math.max(36, Math.min(60, cardH * 0.11));
+  if(S.lines === 2) minRow *= 1.42;
+  const moreH = Math.max(16, Math.min(26, minRow * 0.42));
+
+  const total = tb.dishes.length;
+  const fitAll = Math.max(1, Math.floor((usable + gap) / (minRow + gap)));
+  let show, hasMore;
+  if(fitAll >= total){ show = total; hasMore = false; }
+  else {
+    show = Math.max(1, Math.floor((usable - moreH - gap + gap) / (minRow + gap)));
+    hasMore = true;
+  }
+
+  box.innerHTML = '';
+  tb.dishes.slice(0, show).forEach(d => box.appendChild(drow(d)));
+  if(hasMore) box.appendChild(el('div','more', fmt(t('more'), {n: total - show})));
+  box.dataset.fit = fitAll;
+  box.dataset.shown = show;
+}
+
+function drow(d){
+  const r = el('div','drow'+(d.tone?` t-${d.tone}`:''));
+  const main = el('div','rmain');
+  const l1 = el('div','rline1');
+  const nm = el('span','rname'+(S.lines==2?' two':''), t(d.d));
+  l1.appendChild(nm);
+  if(d.flag) l1.appendChild(el('span','badge b-urgent', t(d.flag)));
+  main.appendChild(l1);
+  if(d.tags && d.tags.length) main.appendChild(el('div','rline2', d.tags.map(x=>t(x)).join(' · ')));
+  r.appendChild(main);
+  const rt = el('div','rright');
+  const q = el('span','rqty', String(d.q));
+  q.dataset.unit = t('unit');
+  rt.appendChild(q);
+  rt.appendChild(el('span','rwait', d.w));
+  r.appendChild(rt);
+  r.onclick = e => { e.stopPropagation(); done(r); };
+  return r;
+}
+function done(r){ r.classList.add('done'); }
+function flash(c,kind){ c.classList.add('press'); setTimeout(()=>c.classList.remove('press'),160); }
+function clearTable(c,tb){ c.classList.add('gone'); setTimeout(()=>{ c.remove(); },420); }
+
+/* ============================================================================
+   5. 渲染 —— 合菜 / 单菜 / 登录
+   ============================================================================ */
+function renderMerge(){
+  const body = $('#body'); body.innerHTML='';
+  const wrap = el('div','merge');
+  const left = el('div','merge-l');
+
+  const mg = el('div','mgrid');
+  const list = pageSlice(MERGES);
+  applyGridRows(mg, list.length);
+  list.forEach(x=>{
+    const m = el('div','mcard'+(x.tone?` t-${x.tone}`:''));
+    if(x.tone) m.appendChild(el('div','mcorner '+x.tone, t(x.tone==='timeout'?'b_timeout':x.tone==='warn'?'mWarn':'b_hold')));
+    const q = el('div','mqty', String(x.q)); q.dataset.unit = t('unit');
+    m.appendChild(q);
+    m.appendChild(el('div','mname', t(x.d)));
+    if(x.tags.length){
+      const tg = el('div','mtags');
+      x.tags.forEach(tg2=>tg.appendChild(el('span','mtag', t(tg2))));
+      tg.appendChild(el('span','mtag', fmt(t('dishes'),{n:x.tables})));
+      m.appendChild(tg);
+    }
+    m.appendChild(el('div','mcheck','✓'));
+    m.onclick = ()=> m.classList.toggle('sel');
+    mg.appendChild(m);
+  });
+  left.appendChild(mg);
+
+  const right = el('div','merge-r');
+  right.appendChild(el('div','mr-hd', `<span class="tip">${fmt(t('mergeSel'),{n:2})}</span><span class="cnt">2</span>`));
+  const rl = el('div','mr-list');
+  const items = [['A05','d_kungpao','02:41',true],['ka021','d_kungpao','01:22',true],['B02','d_kungpao','00:48',false],['C1+A07','d_waterfish','03:10',false]];
+  items.forEach(([tb,d,w,sel])=>{
+    const it = el('div','ditem'+(sel?' sel':''));
+    it.appendChild(el('div','dcheck','✓'));
+    const main = el('div','dmain');
+    main.appendChild(el('div','dl1', `<span class="dtable">${tb}</span><span class="dstage">${t('todo')}</span>`));
+    main.appendChild(el('div','dl2', `<span class="dname">${t(d)}</span><span class="dwait">${w}</span>`));
+    it.appendChild(main);
+    it.appendChild(el('button','dkick', t('singleKick')));
+    rl.appendChild(it);
+  });
+  right.appendChild(rl);
+  const act = el('div','mr-act');
+  const b1 = el('button','btn btn-ghost', t('batch'));
+  const b2 = el('button','btn btn-primary', t('clear'));
+  act.append(b1,b2); right.appendChild(act);
+
+  wrap.append(left,right);
+  body.appendChild(wrap);
+}
+
+/* 单菜视图：小卡片网格 —— 卡上直接体现「桌号 / 菜名 / 做法 / 等待 / 数量」
+   整卡即触摸目标（点卡 = 划单，再点撤销），不需要额外的操作按钮抢版面。 */
+function renderSingle(){
+  const body = $('#body'); body.innerHTML='';
+  const wrap = el('div','single');
+  const list = pageSlice(SINGLES);
+  applyGridRows(wrap, list.length);
+
+  list.forEach(x=>{
+    const c = el('div','scard'+(x.tone?` t-${x.tone}`:''));
+
+    const b = el('div','sbody');
+    const r1 = el('div','srow1');
+    r1.appendChild(el('div','sno', x.tb));
+    const fl = el('div','sflags');
+    if(x.tone==='timeout') fl.appendChild(el('span','badge b-timeout', t('b_timeout')));
+    if(x.tone==='warn')    fl.appendChild(el('span','badge b-warn', t('b_urge')));
+    if(x.tone==='hold')    fl.appendChild(el('span','badge b-hold', t('b_hold')));
+    if(x.gift)             fl.appendChild(el('span','badge b-gift', t('b_gift')));
+    if(fl.children.length) r1.appendChild(fl);
+    b.appendChild(r1);
+    b.appendChild(el('div','sdname', t(x.d)));
+    if(x.tags && x.tags.length) b.appendChild(el('div','sway', x.tags.map(k=>t(k)).join(' · ')));
+    c.appendChild(b);
+
+    const ft = el('div','sft');
+    ft.appendChild(el('div','swait', x.w));
+    const q = el('div','sqty', String(x.q)); q.dataset.unit = t('unit');
+    ft.appendChild(q);
+    c.appendChild(ft);
+    c.appendChild(el('div','sdone','✓'));
+
+    c.onclick = ()=> c.classList.toggle('done');
+    wrap.appendChild(c);
+  });
+  body.appendChild(wrap);
+}
+
+/* ============================================================================
+   5.4 综合屏 A-06 —— 多档口混合
+   ----------------------------------------------------------------------------
+   这一屏要回答的不是「好不好看」，而是四个会改到数据模型的决策，所以屏上自带
+   三个对照开关（评审当场 A/B）。开关本身不是产品配置项，是「评审对照位」：
+     ① 统一 8×6 网格 vs 按档口分栏（后者 = 第四种视图机制，要动 ActiveView 枚举）
+     ② 只读态（EnableOperate=0）卡尾整条消失 vs 置灰（置灰会被读成「坏了/没权限」）
+     ③ 多档口混合时，每行必须看出这道菜归哪个档口
+     ④ 高处远看时纯卡片缺「总数感」，要不要加顶部看板式汇总
+   卡片直接复用单菜卡（scard）的类名与容器查询 —— 同一套字号系数、同一套主题、
+   同一套触摸尺寸，评审时不用重新建立判断标准。
+   ============================================================================ */
+function renderCombo(){
+  const body = $('#body'); body.innerHTML='';
+  const wrap = el('div','combo');
+
+  /* ① 顶部看板式汇总：待制作 / 超时 / 跨日 三个大数字 */
+  if(S.comboSum){
+    const sum = el('div','csum');
+    const late  = COMBOS.filter(x=>x.tone==='timeout').length;
+    const cross = COMBOS.filter(x=>x.cross).length;
+    [['sumTodo',COMBOS.length,''],['sumLate',late,'is-late'],['sumCross',cross,'is-cross']].forEach(([k,n,cls])=>{
+      const cell = el('div','csum-cell '+cls);
+      cell.appendChild(el('b','', String(n)));
+      cell.appendChild(el('span','', t(k)));
+      sum.appendChild(cell);
+    });
+    sum.appendChild(el('div','csum-note', t('sumNote')));
+    wrap.appendChild(sum);
+  }
+
+  /* ② 对照条：三个开关 + 一句「这一档在验什么」 */
+  const bar = el('div','cbar');
+  bar.appendChild(segCtl(t('layTitle'), [['grid',t('layGrid')],['cols',t('layCols')]], S.comboLay,
+    v=>{ S.comboLay=v; S.page=0; render(); }));
+  bar.appendChild(segCtl(t('opTitle'), [['on',t('opOn')],['off',t('opOff')]], S.comboOp,
+    v=>{ S.comboOp=v; render(); }));
+  const sw = el('button','cbar-sw'+(S.comboSum?' on':''));
+  sw.innerHTML = `<i></i><span>${t('comboSum')}</span>`;
+  sw.onclick = ()=>{ S.comboSum = !S.comboSum; render(); };
+  bar.appendChild(sw);
+  bar.appendChild(el('div','cbar-note', S.comboOp==='off' ? t('roNote') : t('layNote')));
+  wrap.appendChild(bar);
+
+  /* ③ 主体：统一网格 / 按档口分栏 */
+  wrap.appendChild(S.comboLay==='cols' ? comboCols() : comboGrid());
+  body.appendChild(wrap);
+}
+
+/* 分段控件：综合屏的对照开关用它，保证「当前值」永远一眼可见 */
+function segCtl(label, opts, val, onPick){
+  const g = el('div','cseg');
+  g.appendChild(el('span','cseg-lb', label));
+  opts.forEach(([v,txt])=>{
+    const b = el('button', v===val ? 'on' : '', txt);
+    b.onclick = ()=> onPick(v);
+    g.appendChild(b);
+  });
+  return g;
+}
+
+/* 统一网格：沿用与三视图相同的「列数 × 行数」机制（决策点①的 A 案） */
+function comboGrid(){
+  const g = el('div','cgrid');
+  const list = pageSlice(COMBOS);
+  const ro = S.comboOp==='off';
+  /* 只读态卡尾整条消失 → 卡片真的变矮 → 省下的高度换成多一行，而不是留白。
+     这才是「卡变矮」的价值；否则只是把内容区拉长，看起来没区别。 */
+  const rows = gridRows(list.length) + (ro ? 1 : 0);
+  g.style.gridTemplateColumns = `repeat(${S.cols}, minmax(0,1fr))`;
+  g.style.gridTemplateRows = `repeat(${rows}, minmax(0,1fr))`;
+  list.forEach(x=> g.appendChild(comboCard(x)));
+  return g;
+}
+
+/* 按档口分栏：一档口一列（决策点①的 B 案）—— 代价是要新增第四种视图机制 */
+function comboCols(){
+  const wrap = el('div','ccols');
+  const PER = 8;   /* 每列最多显示几条：作业屏禁止滚动，放不下就如实标出来 */
+  STATIONS.forEach(st=>{
+    const items = COMBOS.filter(x=>x.st===st);
+    const col = el('div','ccol');
+    const hd = el('div','ccol-hd');
+    hd.appendChild(el('b','', t(st)));
+    hd.appendChild(el('span','ccol-n', String(items.length)));
+    col.appendChild(hd);
+    const bd = el('div','ccol-bd');
+    items.slice(0,PER).forEach(x=> bd.appendChild(comboCard(x)));
+    col.appendChild(bd);
+    /* 放不下就是放不下：分栏的代价要摆在评审眼前，而不是悄悄滚动或压扁 */
+    if(items.length > PER)
+      col.appendChild(el('div','ccol-more', `+${items.length-PER}`));
+    wrap.appendChild(col);
+  });
+  return wrap;
+}
+
+function comboCard(x){
+  /* 复用 scard 的全部样式：字号系数 / 主题 / 触摸尺寸全部继承，只补档口标签 */
+  const c = el('div','scard ccard'+(x.tone?` t-${x.tone}`:'')+(S.comboOp==='off'?' ro':''));
+
+  const b = el('div','sbody');
+  const r1 = el('div','srow1');
+  r1.appendChild(el('div','sno', x.tb));
+  const fl = el('div','sflags');
+  if(x.tone==='timeout') fl.appendChild(el('span','badge b-timeout', t('b_timeout')));
+  if(x.tone==='warn')    fl.appendChild(el('span','badge b-warn', t('b_urge')));
+  if(x.tone==='hold')    fl.appendChild(el('span','badge b-hold', t('b_hold')));
+  if(x.cross)            fl.appendChild(el('span','badge b-timeout', t('sumCross')));
+  if(x.gift)             fl.appendChild(el('span','badge b-gift', t('b_gift')));
+  if(fl.children.length) r1.appendChild(fl);
+  b.appendChild(r1);
+  b.appendChild(el('div','sdname', t(x.d)));
+  if(x.tags && x.tags.length) b.appendChild(el('div','sway', x.tags.map(k=>t(k)).join(' · ')));
+  c.appendChild(b);
+
+  /* 档口标签（决策点③）：多档口混合，没有它师傅分不清「这道该谁做」 */
+  c.appendChild(el('div','cst', t(x.st)));
+
+  /* 卡尾（决策点②）：只读时整条不渲染，而不是渲染出来置灰 */
+  if(S.comboOp==='on'){
+    const ft = el('div','sft');
+    ft.appendChild(el('div','swait', x.w));
+    const q = el('div','sqty', String(x.q)); q.dataset.unit = t('unit');
+    ft.appendChild(q);
+    c.appendChild(ft);
+  }
+  c.onclick = ()=> c.classList.toggle('done');
+  return c;
+}
+
+/* ============================================================================
+   5.5 屏端设置页 A-12 —— 门店能不能自己改对
+   ----------------------------------------------------------------------------
+   这一屏要回答的是「配置错了谁背锅」，六个决策点全部落在界面上：
+     ① 左侧五分组（基础/菜品/厅面楼层/通用/超时）够不够 —— 分组标题带项数，
+        「叫号+语音」如果太重就得从基础里拆出来，评审当场能看出重量分布
+     ② 行列数 = 输入框 + 建议值提示，**绝不自动改值**（自动改值 = 师傅配的值
+        莫名其妙被覆盖，是最难排查的一类投诉）
+     ③ 字号 S/M/L 三档**并排给小样预览** —— 只给下拉等于让门店闭眼选
+     ④ 本页是作业屏**唯一允许滚动**的页，必须配 ▲▼（触摸屏没有滚轮）
+     ⑤ 数据库连接区**只在 Master 本机出现** —— 出现在普通屏，实施会以为每块屏都要连库
+     ⑥ SearchBumpWholeTable 旁必须有**红字警示** —— 无警示会被随手打开
+   ============================================================================ */
+function renderSettings(){
+  const body = $('#body'); body.innerHTML='';
+  const wrap = el('div','set');
+
+  /* 左：五分组导航 —— 本页是长表单，点分组滚过去，不做分步向导
+     （向导会强迫门店走完五步才能改一个值，与「快速改一列」的真实场景相反） */
+  const nav = el('div','set-nav');
+  [['gBasic','basic',5],['gDish','dish',3],['gFloor','floor',2],['gGeneral','general',3],['gTimeout','timeout',2]]
+  .forEach(([k,id,n],i)=>{
+    const b = el('button','set-nav-i'+(i===0?' on':''));
+    b.innerHTML = `<b>${t(k)}</b><span>${n}</span>`;
+    b.onclick = ()=>{
+      [...nav.children].forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      const g = document.getElementById('grp-'+id);
+      if(g) g.scrollIntoView({behavior:'smooth', block:'start'});
+    };
+    nav.appendChild(b);
+  });
+  wrap.appendChild(nav);
+
+  const main = el('div','set-main');
+  const hd = el('div','set-hd');
+  hd.innerHTML = `<b>${t('setTitle')}</b><span>${t('setNote')}</span>`;
+  main.appendChild(hd);
+
+  const bd = el('div','set-bd'); bd.id = 'setBd';
+  bd.appendChild(grpBasic());
+  bd.appendChild(grpDish());
+  bd.appendChild(grpFloor());
+  bd.appendChild(grpGeneral());
+  bd.appendChild(grpDb());
+  bd.appendChild(grpTimeout());
+  main.appendChild(bd);
+
+  /* ▲▼：触摸屏没有滚轮，本页又是唯一允许滚动的页，没有这两个键就改不到底部配置 */
+  const jump = el('div','set-jump');
+  const up = el('button','','▲'), dn = el('button','','▼');
+  up.onclick = ()=> bd.scrollBy({top:-bd.clientHeight*0.8, behavior:'smooth'});
+  dn.onclick = ()=> bd.scrollBy({top: bd.clientHeight*0.8, behavior:'smooth'});
+  jump.append(up,dn);
+  main.appendChild(jump);
+
+  /* 底部操作：全局约定「取消 / 确定」固定在右下角 */
+  const ft = el('div','set-ft');
+  ft.appendChild(el('button','btn btn-ghost', t('setCancel')));
+  const ok = el('button','btn btn-primary', t('setSave'));
+  ok.onclick = ()=>{ ok.textContent='✓'; setTimeout(()=>ok.textContent=t('setSave'), 900); };
+  ft.appendChild(ok);
+  main.appendChild(ft);
+
+  wrap.appendChild(main);
+  body.appendChild(wrap);
+  $('#pager').style.display='none';
+}
+
+/* 一组设置：id 用于左侧导航滚动定位 */
+function setGroup(id, titleKey, rows){
+  const g = el('section','set-grp');
+  g.id = 'grp-'+id;
+  const h = el('h3','set-grp-hd');
+  h.innerHTML = `${t(titleKey)}<span>${rows.length}</span>`;
+  g.appendChild(h);
+  rows.forEach(r=> g.appendChild(r));
+  return g;
+}
+/* 一行：标签 + 控件 + 可选说明 */
+function setRow(label, ctrl, note){
+  const r = el('div','set-row');
+  r.appendChild(el('div','set-lb', label));
+  const c = el('div','set-ct');
+  if(typeof ctrl === 'string') c.innerHTML = ctrl; else c.appendChild(ctrl);
+  r.appendChild(c);
+  if(note) r.appendChild(el('div','set-note', note));
+  return r;
+}
+/* 开关：复用综合屏对照条的开关样式 —— 同一套控件语言，不另造一套 */
+function setSw(on, label){
+  const b = el('button','cbar-sw'+(on?' on':''));
+  b.innerHTML = `<i></i><span>${label}</span>`;
+  b.onclick = ()=> b.classList.toggle('on');
+  return b;
+}
+/* 数字输入：给建议值但绝不自动改 —— 自动改值是最难排查的一类投诉 */
+function setNum(v, suggest){
+  const box = el('div','set-num');
+  const inp = el('input','set-inp'); inp.type='text'; inp.value = v; inp.inputMode='numeric';
+  box.appendChild(inp);
+  if(suggest) box.appendChild(el('span','set-sug', fmt(t('fSuggest'),{n:suggest})));
+  return box;
+}
+/* 字号三档：并排小样预览 —— 档位不是抽象名词，是「这一档实际长什么样」 */
+function fontPreview(){
+  const box = el('div','set-font');
+  [['fontS',24],['fontM',28],['fontL',32]].forEach(([label,px],i)=>{
+    const c = el('div','set-font-i'+(i===1?' on':''));
+    c.innerHTML = `<span class="sf-lb">${t(label)}</span>`+
+                  `<span class="sf-sample" style="font-size:${px}px">${t('d_kungpao')}</span>`+
+                  `<span class="sf-px">${px}px</span>`;
+    c.onclick = ()=>{ [...box.children].forEach(x=>x.classList.remove('on')); c.classList.add('on'); };
+    box.appendChild(c);
+  });
+  return box;
+}
+
+function grpBasic(){
+  return setGroup('basic','gBasic',[
+    setRow(t('fLang'),  segCtl('', [['zh','中文'],['yue','繁體'],['en','EN'],['de','DE'],['ru','RU'],['ar','AR']],
+             S.lang,  v=>{ S.lang=v;  render(); })),
+    setRow(t('fTheme'), segCtl('', [['a','A · 夜航'],['b','B · 晨光']], S.theme, v=>{ S.theme=v; render(); })),
+    setRow(t('fCols'), setNum('8','8'), t('fNoAuto')),
+    setRow(t('fRows'), setNum('6','6'), t('fNoAuto')),
+    setRow(t('fFont'), fontPreview())
+  ]);
+}
+function grpDish(){
+  return setGroup('dish','gDish',[
+    setRow(t('fConfirm'), setSw(true, 'ON')),
+    setRow(t('fHoldTop'), setSw(false,'OFF')),
+    setRow(t('fTagShow'), setSw(true, 'ON'))
+  ]);
+}
+function grpFloor(){
+  return setGroup('floor','gFloor',[
+    setRow(t('fFloorSel'), segCtl('', [['all',t('fAll')],['f1','1F'],['f2','2F']], 'all', ()=>{})),
+    setRow(t('fStation'),  segCtl('', STATIONS.map(s=>[s,t(s)]), 'st_hot', ()=>{}))
+  ]);
+}
+function grpGeneral(){
+  /* ⑥ 搜索回车划整桌：必须带红字警示，否则会被随手打开 */
+  const r = setRow(t('fBump'), setSw(false,'OFF'), '');
+  r.appendChild(el('div','set-warn', '⚠ '+t('fBumpWarn')));
+  return setGroup('general','gGeneral',[
+    setRow(t('fSound'), setSw(true, 'ON')),
+    setRow(t('fPrint'), setSw(false,'OFF')),
+    r
+  ]);
+}
+/* ⑤ 数据库连接区：只在 Master 本机出现。这里给一个「Master / 普通屏」对照开关，
+   让评审当场看到「普通屏根本没有这一区」—— 比在文档里写一行有效得多。 */
+function grpDb(){
+  const g = el('section','set-grp is-master');
+  g.id = 'grp-db';
+  const h = el('h3','set-grp-hd');
+  h.innerHTML = `${t('fDb')}<span>${t('fDbNote')}</span>`;
+  h.appendChild(segCtl('', [['master','Master'],['normal','普通屏']], 'master',
+    v=> g.classList.toggle('is-master', v==='master')));
+  g.appendChild(h);
+  g.appendChild(setRow('Server',   '<input class="set-inp wide" value="10.0.0.12">', ''));
+  g.appendChild(setRow('Database', '<input class="set-inp wide" value="KDS_Master">', ''));
+  g.appendChild(el('div','set-hidden-note', t('fDbNote')));
+  return g;
+}
+function grpTimeout(){
+  return setGroup('timeout','gTimeout',[
+    setRow(t('fWarnAt'), setNum('8','8')),
+    setRow(t('fLateAt'), setNum('15','15'))
+  ]);
+}
+
+/* 登录屏语言的短自称：只写本语种自己的写法，不给翻译腔的括号注释。
+   认出自己的文字是第一步 —— 界面再友好，看不懂也是零。 */
+const LANG_SHORT = {zh:'简体中文', yue:'繁體中文', en:'English', de:'Deutsch', ru:'Русский', ar:'العربية'};
+const LANG_ORDER = ['zh','yue','en','de','ru','ar'];
+/* 登录屏的按键入口。renderLogin 里把它指向闭包内的 press()，
+   全局 keydown 才能复用同一条逻辑 —— 真键盘与小键盘不能有两套实现，否则必分叉。 */
+let loginPress = null;
+
+function renderLogin(){
+  const L  = S.login;
+  const body = $('#body'); body.innerHTML='';
+  const outer = el('div','login');
+  const wrap  = el('div','login-wrap');
+
+  const card = el('div','login-card');
+  card.innerHTML = `
+    <div class="lg-title">${t('loginTitle')}</div>
+    <div class="lg-sub">${t('loginSub')}</div>
+    <div class="lg-lang">
+      <span class="lg-lang-lb">${t('lgLang')}</span>
+      <div class="lg-lang-opts" role="group" aria-label="${t('lgLang')}"></div>
+    </div>
+    <div class="field"><label>${t('empNo')}</label>
+      <div class="inp" data-f="emp" role="textbox" aria-label="${t('empNo')}"></div></div>
+    <div class="field"><label>${t('pin')}</label>
+      <div class="inp" data-f="pin" role="textbox" aria-label="${t('pin')}"></div></div>
+    <div class="lg-err" role="status" aria-live="polite"></div>
+    <button class="lg-btn">${t('loginBtn')}</button>
+    <div class="lg-foot"><span>${t('shift')}</span><span>${t('ver')}</span></div>`;
+
+  /* 语言切换 —— 必须在登录屏就能切。
+     藏进设置里等于死锁：看不懂当前这屏文字的人，根本找不到进设置的路。 */
+  const opts = card.querySelector('.lg-lang-opts');
+  LANG_ORDER.forEach(code=>{
+    const b = el('button', S.lang===code ? 'on' : '', LANG_SHORT[code]);
+    b.lang = (LANG_META[code]||{}).tag || code;   // 让读屏用该语种自己的发音念出来
+    b.setAttribute('aria-pressed', S.lang===code ? 'true':'false');
+    b.onclick = ()=>{ S.lang = code; render(); };
+    opts.appendChild(b);
+  });
+
+  const fEmp = card.querySelector('[data-f="emp"]');
+  const fPin = card.querySelector('[data-f="pin"]');
+  const errEl= card.querySelector('.lg-err');
+  const lgBtn= card.querySelector('.lg-btn');
+
+  const np = el('div','numpad');
+  np.innerHTML = `<div class="np-top"><span class="np-lb"></span><b class="np-val"></b></div>`+
+    `<div class="np-grid">`+
+    ['1','2','3','4','5','6','7','8','9'].map(n=>`<button data-k="${n}">${n}</button>`).join('')+
+    `<button class="fn" data-k="del" aria-label="${t('npClear')}">⌫</button>`+
+    `<button data-k="0">0</button>`+
+    `<button class="ok" data-k="ok">${t('loginBtn')}</button></div>`;
+  const npLb = np.querySelector('.np-lb'), npVal = np.querySelector('.np-val');
+
+  /* 只重绘「值」，不整屏重建 —— 每敲一个键重建一次 DOM，
+     触屏上会掉手感，而且输入框会失去焦点样式。 */
+  function paint(){
+    fEmp.innerHTML = L.emp ? `<span>${L.emp}</span>` : `<span class="ph">${t('empPh')}</span>`;
+    fPin.innerHTML = L.pin ? `<span class="dots">${'•'.repeat(L.pin.length)}</span>`
+                           : `<span class="ph">${t('pinPh')}</span>`;
+    fEmp.classList.toggle('focus', L.tgt==='emp');
+    fPin.classList.toggle('focus', L.tgt==='pin');
+    /* 错误态只标真正没填的那一项 —— 两条一起标红，人反而不知道先改哪个 */
+    fEmp.classList.toggle('err', !!L.err && L.emp.length===0);
+    fPin.classList.toggle('err', !!L.err && L.pin.length<4);
+    errEl.textContent = L.err || '';
+    /* 键盘顶部永远显示「数字现在打到哪里」：触屏没有光标，不标出来会被当成坏了 */
+    npLb.textContent = L.tgt==='emp' ? t('empNo') : t('pin');
+    npVal.textContent = L.tgt==='emp' ? (L.emp || '—') : ('•'.repeat(L.pin.length) || '—');
+  }
+
+  function press(k){
+    L.err = '';
+    if(k==='del'){ if(L.tgt==='emp') L.emp = L.emp.slice(0,-1); else L.pin = L.pin.slice(0,-1); paint(); return; }
+    if(k==='ok'){ submit(); return; }
+    if(L.tgt==='emp'){ if(L.emp.length < 10) L.emp += k; }
+    else            { if(L.pin.length <  6) L.pin += k; }
+    paint();
+  }
+
+  function submit(){
+    if(!L.emp || L.pin.length < 4){
+      L.err = t('loginErr');
+      L.tgt = L.emp ? 'pin' : 'emp';     // 光标跳到第一个没填好的字段
+      paint();
+      return;
+    }
+    /* 登录成功：给一个明确的成功态再切走。
+       没有这一步，点完「登录」屏幕直接跳，人不确定刚才按没按上。 */
+    lgBtn.textContent = t('loginOk');
+    lgBtn.classList.add('done');
+    setTimeout(()=>{
+      S.login = { emp:'', pin:'', tgt:'emp', err:'' };   // 交完班会退回来重新签到，表单必须是空的
+      S.view = 'table';
+      render();
+    }, 620);
+  }
+
+  fEmp.onclick = ()=>{ L.tgt='emp'; paint(); };
+  fPin.onclick = ()=>{ L.tgt='pin'; paint(); };
+  lgBtn.onclick = submit;
+  np.querySelectorAll('[data-k]').forEach(b=>{ b.onclick = ()=> press(b.dataset.k); });
+  loginPress = press;
+
+  wrap.append(card, np);
+  outer.appendChild(wrap);
+  body.appendChild(outer);
+  $('#pager').style.display = 'none';
+  paint();
+}
+
+/* ============================================================================
+   6. 顶栏 / 分页
+   ============================================================================ */
+function renderChrome(){
+  $('#brandName').textContent = t('brand');
+  $('#brandSub').textContent = t('sub');
+  $('#bizDay').textContent = t('biz');
+  $('#searchInput').placeholder = t('search');
+
+  const tabs = $('#tabs'); tabs.innerHTML='';
+  /* 综合屏也是作业屏的一种视图，与三视图并列进顶栏 Tab —— 它不是「另一类页面」，
+     登录才是（所以登录不进这个数组，靠 is-login 收权限） */
+  [['table','tabTable'],['merge','tabMerge'],['single','tabSingle'],['combo','tabCombo']].forEach(([v,k])=>{
+    const b = el('button', S.view===v?'on':'', t(k));
+    b.onclick = ()=> setView(v);
+    tabs.appendChild(b);
+  });
+
+  const chips = $('#chips'); chips.innerHTML='';
+  [['fAll','',12],['fUrge','c-urge',3],['fTimeout','c-timeout',3],['fHold','',1]].forEach(([k,cls,n],i)=>{
+    const b = el('button','chip '+cls+(i===0?' on':''), `<span>${t(k)}</span><b>${n}</b>`);
+    b.onclick = ()=>{ [...chips.children].forEach(x=>x.classList.remove('on')); b.classList.add('on'); };
+    chips.appendChild(b);
+  });
+
+  $('#pgPrevTxt').textContent = t('prev');
+  $('#pgNextTxt').textContent = t('next');
+}
+
+function renderPager(){
+  const pager = $('#pager');
+  /* 登录与设置页都没有卡片网格，分页条收起 */
+  if(S.view==='login' || S.view==='settings'){ pager.style.display='none'; return; }
+  pager.style.display='flex';
+  const m = pageCount();
+  $('#pgPrev').disabled = S.page<=0;
+  $('#pgNext').disabled = S.page>=m-1;
+  $('#pgNum').textContent = fmt(t('page'),{n:S.page+1,m});
+  /* 三种视图的计数口径不同：桌台数桌、合菜数道、单菜数待出 */
+  const src = itemsOf(S.view);
+  const late = src.filter(x=>x.tone==='timeout').length;
+  $('#pgTotal').textContent = S.view==='table' ? fmt(t('totalN'),{n:src.length})
+    : S.view==='merge' ? fmt(t('totalDish'),{n:src.length})
+    : S.view==='combo' ? fmt(t('comboTotal'),{n:src.length})
+    : fmt(t('totalSingle'),{n:src.length});
+  $('#pgTimeout').textContent = S.view==='table' ? fmt(t('timeoutN'),{n:late}) : fmt(t('timeoutDish'),{n:late});
+  const dots = $('#pgDots'); dots.innerHTML='';
+  for(let i=0;i<m;i++){ const d=el('i', i===S.page?'on':''); dots.appendChild(d); }
+}
+
+/* ============================================================================
+   7. 溢出审计：找出所有被 ellipsis 截断的文本
+   ============================================================================ */
+function audit(){
+  document.querySelectorAll('.ovf').forEach(n=>n.classList.remove('ovf'));
+  if(!S.audit){ $('#auditBar').classList.remove('on'); return; }
+  let n = 0;
+  document.querySelectorAll('#body .rname,#body .rline2,#body .ctno,#body .ccnt,#body .badge,#body .cwait,#body .btn,#tabs button,.chip,#body .dname,#body .dtable,.pg-info,.pg-num,#body .mname,.mcorner,#body .sdname,#body .sno,#body .sway,#body .swait,#body .sqty,#body .mtag,#body .cst,.cseg button,.csum-cell span',).forEach(node=>{
+    if(node.scrollWidth > node.clientWidth + 1 && node.clientWidth > 0){
+      node.classList.add('ovf'); n++;
+    }
+  });
+  const bar = $('#auditBar');
+  bar.textContent = n ? `审计：${n} 处文本被截断（虚线标出）` : '审计：无文本截断';
+  bar.style.background = n ? '#FF3B30' : '#237A0F';
+  bar.classList.add('on');
+}
+
+/* ============================================================================
+   8. 顶栏降级（宽度不够时逐级收）
+   ============================================================================ */
+function fitTopbar(){
+  const app = $('#app'), top = $('#top');
+  app.classList.remove('lv1','lv2','lv3');
+  // 强制回流后逐级加，直到不溢出
+  if(top.scrollWidth > top.clientWidth + 1){ app.classList.add('lv1'); }
+  if(top.scrollWidth > top.clientWidth + 1){ app.classList.add('lv2'); }
+  if(top.scrollWidth > top.clientWidth + 1){ app.classList.add('lv3'); }
+}
+
+/* ============================================================================
+   8.5 触摸键盘 —— 底部抽屉（顶栏搜索框专用）
+   为什么自带键盘：一体机上的系统输入法要么不弹、要么弹出后压住半屏，
+   而这里输的是「菜名 / 桌号 / 订单号」这类现场口播信息，输不进去直接等于断线。
+   ============================================================================ */
+/* 拼音索引挂数据层、不进翻译词典：六种语言共用一份，也不污染 i18n 结构。
+   值是「全拼 + 首字母」，两者都参与匹配，输 gb 和 gongbao 都能命中。 */
+const PY = {
+  d_kungpao:'gongbaojiding gbjd', d_rice:'mifan mf', d_soup:'litang lt',
+  d_cucumber:'paihuanggua phg', d_wuchan:'banhuanggua bhg',
+  d_steamfish:'qingzhengluyu qzly', d_buddha:'fotiaoqiang ftq',
+  d_coke:'kele kl', d_mabo:'mapodoufu mpdf', d_waterfish:'shuizhuyu szy',
+  d_cauliflower:'ganguohuacai gghc', d_egg:'wojuchaodan wjcd',
+  d_beef:'fanqieniunan fqnn', d_shrimp:'suanrongfensizhengxia srfszx',
+  d_offal:'xianmaqingjiaoniuyouguodifumaodu xmqjnygdfmd'
+};
+const K_NUM = ['1','2','3','4','5','6','7','8','9','0',{k:'clr',t:'清空'},{k:'del',t:'⌫'}];
+const K_ABC = [
+  'QWERTYUIOP'.split(''),
+  [...'ASDFGHJKL'.split(''), {k:'del',t:'⌫'}],
+  [{k:'clr',t:'清空'}, ...'ZXCVBNM'.split(''), {k:'num',t:'数字'}],
+  [{k:'sp',t:'空格'}, {k:'go',t:'确认搜索'}]
+];
+const MAXQ = 24;
+const dishKeys = x => x.d ? [x.d] : (x.dishes||[]).map(y=>y.d);
+const itemText = x => ((x.no||x.tb||'') + ' ' + dishKeys(x).map(k=>t(k)||'').join(' ')).toLowerCase();
+const cleanQ = s => String(s||'').replace(/[^\w \u4e00-\u9fa5-]/g,'').slice(0, MAXQ);
+
+function buildKB(){
+  const num=$('#pageNum'), abc=$('#pageAbc');
+  num.innerHTML=''; abc.innerHTML='';
+  const mk = x=>{
+    const k = typeof x==='string' ? x : x.k;
+    const lb= typeof x==='string' ? x : x.t;
+    const b = el('button','kb-k'+(k.length>1 ? (k==='go' ? ' go' : ' fn') : ''), lb);
+    b.type='button'; b.dataset.k=k;
+    return b;
+  };
+  K_NUM.forEach(x => num.appendChild(mk(x)));
+  K_ABC.forEach(row => row.forEach(x => abc.appendChild(mk(x))));
+
+  const onKeys = (box, fn) => box.addEventListener('click', e=>{
+    const b = e.target.closest('.kb-k'); if(!b) return;
+    e.stopPropagation(); fn(b.dataset.k);
+  });
+  onKeys(num, kbPress); onKeys(abc, kbPress);
+
+  $('#kbBtn').addEventListener('click', e=>{ e.stopPropagation(); openKB(!S.kb); });
+  $('#kbX') .addEventListener('click', e=>{ e.stopPropagation(); openKB(false); });
+  $('.kb-tab').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    e.stopPropagation(); setKBPage(b.dataset.page);
+  });
+  /* 点输入框也开：手已经伸过去了，不该再要求它精准命中 38px 的小图标 */
+  $('.search').addEventListener('pointerdown', e=>{ if(e.target!==$('#kbBtn') && !S.kb) openKB(true); });
+  /* 戳到卡片就收：被盖住的那一排是「暂时让开」，不是长期压着 */
+  $('#body').addEventListener('pointerdown', ()=>{ if(S.kb) openKB(false); });
+}
+
+function kbPress(k){
+  if(k==='del')      S.q = S.q.slice(0,-1);
+  else if(k==='clr') S.q = '';
+  else if(k==='sp')  S.q += ' ';
+  else if(k==='num'){ setKBPage('num'); return; }
+  else if(k==='go'){  openKB(false);    return; }
+  /* 键面按 QWERTY 惯例排大写，落进搜索词统一转小写 ——
+     匹配本身也走 toLowerCase，大小写不敏感，但存小写看着更干净 */
+  else S.q += (/^[A-Z]$/.test(k) ? k.toLowerCase() : k);
+  S.q = cleanQ(S.q);
+  applyQuery();
+}
+/* 真键盘与虚拟键盘共用 kbPress —— 两套实现迟早分叉，这是唯一入口 */
+function kbKeyFromKeyboard(key){
+  if(/^[0-9a-z]$/i.test(key)) kbPress(key.toLowerCase());
+  else if(key==='Backspace')  kbPress('del');
+  else if(key===' ')          kbPress('sp');
+  else if(key==='Enter')      kbPress('go');
+}
+
+function setKBPage(p){
+  S.kbPage = (p==='abc') ? 'abc' : 'num';
+  $('#pageNum').classList.toggle('hide', S.kbPage!=='num');
+  $('#pageAbc').classList.toggle('hide', S.kbPage!=='abc');
+  $('#kb').querySelectorAll('.kb-tab button')
+    .forEach(b=> b.classList.toggle('on', b.dataset.page===S.kbPage));
+}
+
+function openKB(v){
+  /* 登录 / 设置页的顶栏收起了全部业务入口，此时不该冒出键盘 */
+  if(v && (S.view==='login' || S.view==='settings')) v = false;
+  S.kb = v;
+  const kb = $('#kb');
+  if(v) kb.removeAttribute('hidden'); else kb.setAttribute('hidden','');
+  $('#kbBtn').classList.toggle('on', v);
+  $('#app').classList.toggle('kb-open', v);
+  if(v){ setKBPage(S.kbPage); applyQuery(); } else clearHits();
+}
+
+/* 一次输入，三处同源同步：顶栏输入框 / 抽屉里的取景框 / 卡片网格的高亮。
+   不同步就会出现「抽屉里显示 A12、屏上却高亮 B03」这种说不清的鬼状态。 */
+function applyQuery(){
+  const q = (S.q||'').trim().toLowerCase();
+  const inp = $('#searchInput'), val = $('#kbVal'), hit = $('#kbHit');
+  if(inp) inp.value = S.q || '';
+  if(val) val.innerHTML = S.q ? S.q.replace(/[<>]/g,'') : `<span class="ph">${t('search')}</span>`;
+  if(!hit) return;
+
+  const src  = itemsOf(S.view);
+  const hits = [];
+  if(q) src.forEach(x=>{
+    const no = x.no || x.tb || '';
+    const py = dishKeys(x).map(k=>PY[k]||'').join(' ').toLowerCase();
+    if(no.toLowerCase().includes(q) || itemText(x).includes(q) || py.includes(q)) hits.push(no || t(x.d));
+  });
+  const uniq = [...new Set(hits)];
+
+  if(!q)               hit.innerHTML = `<span class="none">${t('kbHint')}</span>`;
+  else if(!uniq.length)hit.innerHTML = `<span class="none">${t('kbNone')}</span>`;
+  else{
+    hit.innerHTML = `<b>${fmt(t('kbHit'),{n:uniq.length})}</b>` +
+      uniq.slice(0,6).map(n=>`<button data-jump="${n.replace(/"/g,'')}">${n.replace(/</g,'')}</button>`).join('');
+  }
+
+  /* 卡片网格：命中的描边强调，没命中的原地淡出。
+     刻意不做隐藏 —— 作业屏上让卡片凭空消失会造成位置记忆错乱。 */
+  document.querySelectorAll('#body .tcard, #body .mcard, #body .scard, #body .ccard').forEach(c=>{
+    if(!q){ c.classList.remove('kb-on','kb-off'); return; }
+    const pyHit = [...c.querySelectorAll('.rname,.sdish,.sname,.mname')].some(n=>{
+      const key = Object.keys(PY).find(k => t(k) === n.textContent.trim());
+      return key ? PY[key].includes(q) : false;
+    });
+    const on = c.innerText.toLowerCase().includes(q) || pyHit;
+    c.classList.toggle('kb-on', on);
+    c.classList.toggle('kb-off', !on);
+  });
+}
+/* 收起抽屉 = 结束这次搜索：把网格恢复原样，但搜索词留在框里，
+   再点 ⌨ 还能接着输，不会因为误触收起就白打一遍。 */
+function clearHits(){
+  const hit = $('#kbHit');
+  if(hit) hit.innerHTML = `<span class="none">${t('kbHint')}</span>`;
+  document.querySelectorAll('.kb-on,.kb-off').forEach(c=> c.classList.remove('kb-on','kb-off'));
+}
+
+/* ============================================================================
+   9. 主渲染
+   ============================================================================ */
+/* 每种视图的「理想卡片尺寸」和可选行列范围。
+   自动密度 = 拿视口面积去除以目标卡尺寸，再吸附到最近的合法档位。 */
+const DENS = {
+  table : {cols:[2,3,4,5,6], rows:[1,2,3,4],   cw:560, ch:400, cMin:2, rMin:1},
+  merge : {cols:[2,3,4,5,6], rows:[2,3,4,5],   cw:360, ch:250, cMin:2, rMin:2},
+  single: {cols:[3,4,5,6,7,8], rows:[2,3,4,5], cw:272, ch:186, cMin:3, rMin:2},
+  /* 综合屏：信息量最大（多档口混合）。理想卡 250×150 —— 比单菜卡小而密，
+     1920×1080 下自动吸附到 8×6 = 48 卡/页，正好落在清单冻结的网格上。 */
+  combo : {cols:[3,4,5,6,7,8], rows:[3,4,5,6], cw:225, ch:132, cMin:3, rMin:3}
+};
+const nearest = (list, v) => list.reduce((a,b)=> Math.abs(b-v) < Math.abs(a-v) ? b : a);
+
+function autoDensity(){
+  if(!S.auto) return false;
+  const d = DENS[S.view] || DENS.table;
+  const b = document.getElementById('body');
+  const w = (b ? b.clientWidth  : innerWidth)        - 44;
+  const h = (b ? b.clientHeight : innerHeight - 160) - 44;
+  const c = nearest(d.cols, Math.max(d.cMin, Math.round(w / d.cw)));
+  const r = nearest(d.rows, Math.max(d.rMin, Math.round(h / d.ch)));
+  const changed = (c !== S.cols || r !== S.rows);
+  S.cols = c; S.rows = r;
+  syncDensityUI();
+  return changed;
+}
+function syncOpts(sel, val){
+  document.querySelectorAll(sel + ' button').forEach(b => b.classList.toggle('on', Number(b.dataset.v) === val));
+}
+/* 面板上的行列：按当前视图重建按钮组（桌台 2–6 列，单菜可到 8 列） */
+function buildDensityOpts(){
+  const d = DENS[S.view] || DENS.table;
+  [['#optCols','cols'],['#optRows','rows']].forEach(([sel,k])=>{
+    const box = $(sel); if(!box) return;
+    box.innerHTML='';
+    d[k].forEach(v=>{
+      const b = el('button', String(S[k])===String(v) ? 'on' : '', String(v));
+      b.dataset.v = v;
+      b.onclick = ()=>{
+        S[k] = v; S.auto = false;
+        const sw = document.getElementById('swAuto'); if(sw) sw.classList.remove('on');
+        S.page = 0; syncDensityUI(); render();
+      };
+      box.appendChild(b);
+    });
+  });
+  syncDensityUI();
+}
+/* 当前视图名：login 不属于三视图，必须单列 —— 否则标签会误显示成「桌台」 */
+function viewLabel(){
+  return S.view==='login'    ? t('login')
+       : S.view==='settings' ? t('tabSet')
+       : S.view==='merge'    ? t('tabMerge')
+       : S.view==='single'   ? t('tabSingle')
+       : S.view==='combo'    ? t('tabCombo')
+       : t('tabTable');
+}
+
+function syncDensityUI(){
+  const cv = document.getElementById('colsV'), rv = document.getElementById('rowsV');
+  if(cv) cv.textContent = S.cols;
+  if(rv) rv.textContent = S.rows;
+  syncOpts('#optCols', S.cols); syncOpts('#optRows', S.rows);
+  const vn = document.getElementById('viewNote');
+  if(vn) vn.textContent = viewLabel();
+}
+
+function render(){
+  autoDensity();
+  if(S.page > pageCount()-1) S.page = Math.max(0, pageCount()-1);
+  const lm = langMeta();
+  document.documentElement.lang = lm.tag;
+  document.documentElement.dir  = lm.dir;
+  /* 语言项旁的小注：显示全名 + 文本膨胀系数。
+     这个数直接决定要不要留截断余量，所以摆在使用者眼前而不是藏在文档里 */
+  const ln = document.getElementById('langNote');
+  if(ln) ln.textContent = `${lm.name} · 文本 ×${lm.len.toFixed(2)}`;
+  /* 挂在 <html> 上，保证 #panel / #fab / #scrim 等 #app 之外的元素同样拿到令牌 */
+  document.documentElement.dataset.theme = S.theme;
+  document.documentElement.dataset.contrast = S.contrast;
+  document.documentElement.style.setProperty('--cols', S.cols);
+  document.documentElement.style.setProperty('--rows', S.rows);
+  applyScale();
+
+  /* 登录态标记：顶栏据此收起业务入口（视图切换 / 筛选 / 搜索 / 操作员 / 划单） */
+  document.getElementById('app').classList.toggle('is-login', S.view==='login');
+  /* 只读态（综合屏 EnableOperate=0）：只收「我的划单」—— 只读屏点进去永远为空，
+     是被误导的入口；「换人」与顶栏其它业务入口仍然成立，不能跟着收。 */
+  document.getElementById('app').classList.toggle('is-ro', S.view==='combo' && S.comboOp==='off');
+  /* 设置页也不是作业态：顶栏同样收起业务入口，只留品牌块与时钟 */
+  document.getElementById('app').classList.toggle('is-settings', S.view==='settings');
+
+  renderChrome();
+  if(S.view==='table') renderTable();
+  else if(S.view==='merge') renderMerge();
+  else if(S.view==='single') renderSingle();
+  else if(S.view==='combo') renderCombo();
+  else if(S.view==='settings') renderSettings();
+  else renderLogin();
+  renderPager();
+  /* 键盘状态跟着重建一起重放：切视图 / 切语言后，抽屉与网格高亮不能断层 */
+  syncKB();
+
+  requestAnimationFrame(()=>{ fitTopbar(); updateReadout(); setTimeout(audit,120); });
+}
+
+/* 重放键盘状态，但不改变 S.kb 本身 —— render 不该偷偷改状态，
+   否则「切个语言键盘自己开了」这种事会反复出现。 */
+function syncKB(){
+  const kb = $('#kb');
+  if(!kb) return;
+  const on = !!S.kb;
+  if(on) kb.removeAttribute('hidden'); else kb.setAttribute('hidden','');
+  $('#kbBtn').classList.toggle('on', on);
+  $('#app').classList.toggle('kb-open', on);
+  setKBPage(S.kbPage);
+  if(on) applyQuery(); else clearHits();
+}
+
+/* 字号系数随缩放重算：CSS 里只做「系数 × 1cqw」，规避 calc 三连乘限制 */
+const K_BASE = {
+  'k-table-w':6.6, 'k-table-h':11.55,
+  'k-dish-w':5.0,  'k-dish-h':8.6,
+  'k-qty-w':5.0,   'k-qty-h':8.5,
+  'k-time-w':4.2,  'k-time-h':7.14,
+  'k-badge-w':3.15,'k-badge-h':5.4,
+  'k-btn-w':4.2,   'k-tip-w':3.2,
+  'k-tip9-w':2.88, 'k-badge9-w':2.84,
+  'k-qty8-w':4.1,  'k-sm-w':2.58,
+  'k-dish2-w':7.8, 'k-dish2-h':10.6,
+  /* 单菜小卡：比例按「卡宽 272 × 卡高 186」标定，宽或高任一变小字号都跟着收 */
+  'k-sno-w':5.6,   'k-sno-h':7.7,
+  'k-sdish-w':10.8,'k-sdish-h':14.6,
+  'k-sway-w':5.1,  'k-sway-h':6.9,
+  'k-swait-w':5.2, 'k-swait-h':7.1,
+  'k-sqty-w':9.2,  'k-sqty-h':12.0,
+  'k-sdone-w':5.0
+};
+function applyScale(){
+  const st = document.documentElement.style;
+  st.setProperty('--fs-scale', S.scale);
+  for(const [k,v] of Object.entries(K_BASE)){
+    st.setProperty('--'+k, (v * S.scale).toFixed(3));
+  }
+}
+
+/* 实时读数：永远量「当前视图」真实渲染出来的那一类卡片 */
+function updateReadout(){
+  /* 登录视图没有卡片网格，密度/页码/触摸目标这些读数对它没有意义，
+     硬套会显示「卡片 —×— / 触摸目标 0px 不达标」这种假告警 —— 换成量登录卡与数字键。 */
+  if(S.view==='login'){
+    const lc = document.querySelector('.login-card');
+    const np = document.querySelector('.numpad');
+    const key = document.querySelector('.np-grid button');
+    const kb = key ? key.getBoundingClientRect() : null;
+    const kh = kb ? Math.round(kb.height) : 0;
+    $('#readout').innerHTML =
+      `视口 <b>${innerWidth}×${innerHeight}</b> · DPR ${devicePixelRatio} · 视图 <b>${t('login')}</b><br>`+
+      `登录卡 <b>${lc ? Math.round(lc.clientWidth)+'×'+Math.round(lc.clientHeight) : '—'}</b> px`+
+      ` · 键盘 <b>${np ? Math.round(np.clientWidth)+'×'+Math.round(np.clientHeight) : '—'}</b> px<br>`+
+      `数字键 <b>${kb ? Math.round(kb.width)+'×'+kh : '—'}</b> px ${kh>=48?'<span class="ok">达标</span>':'<span class="warn">低于 48px 触摸标准</span>'}<br>`+
+      `字号缩放 <b>${Math.round(S.scale*100)}%</b>（仅${t('login')}） · 语言 <b>${langMeta().name}</b>`;
+    return;
+  }
+  /* 设置页同样是表单页：该量的是「行高够不够手指点」和「内容区滚动余量」，
+     不是卡片密度 —— 沿用卡片读数会给出「卡片 —×— / 触摸目标 0px」的假告警。 */
+  if(S.view==='settings'){
+    const bd = document.getElementById('setBd');
+    const btn = document.querySelector('.set-ft .btn');
+    const inp = document.querySelector('.set-inp');
+    const bh = btn ? Math.round(btn.getBoundingClientRect().height) : 0;
+    const ih = inp ? Math.round(inp.getBoundingClientRect().height) : 0;
+    const scrollable = bd ? (bd.scrollHeight - bd.clientHeight) : 0;
+    $('#readout').innerHTML =
+      `视口 <b>${innerWidth}×${innerHeight}</b> · DPR ${devicePixelRatio} · 视图 <b>${t('tabSet')}</b><br>`+
+      `内容区 <b>${bd ? Math.round(bd.clientWidth)+'×'+Math.round(bd.clientHeight) : '—'}</b> px`+
+      ` · 可滚动余量 <b>${Math.max(0,Math.round(scrollable))}</b> px（本页允许滚动）<br>`+
+      `输入框高 <b>${ih||'—'}</b>px · 按钮高 <b>${bh||'—'}</b>px ${bh>=48?'<span class="ok">达标</span>':'<span class="warn">低于 48px 触摸标准</span>'}<br>`+
+      `语言 <b>${langMeta().name}</b> <span class="${langMeta().len>=1.7?'warn':'ok'}">文本长度 ×${langMeta().len.toFixed(2)}</span>`;
+    return;
+  }
+  const pick = S.view==='single' ? ['.scard','.sdname']
+             : S.view==='merge'  ? ['.mcard','.mname']
+             : S.view==='combo'  ? ['.ccard','.sdname']
+             : ['.tcard','.rname'];
+  const card = document.querySelector(pick[0]);
+  let cardW='—', cardH='—', dishFs='—', extra='';
+  if(card){
+    cardW = Math.round(card.clientWidth); cardH = Math.round(card.clientHeight);
+    const n = card.querySelector(pick[1]);
+    if(n) dishFs = getComputedStyle(n).fontSize;
+    if(S.view==='table'){
+      const b = card.querySelector('.cbd');
+      extra = ` · 每卡 <b>${(b && b.dataset.fit) || '—'}</b> 道菜`;
+    } else if(S.view==='single'){
+      const q = card.querySelector('.sqty');
+      extra = q ? ` · 数量 <b>${getComputedStyle(q).fontSize}</b>` : '';
+    }
+  }
+  const perPage = S.cols*S.rows;
+  const src = itemsOf(S.view);
+  /* 触摸目标：单菜整卡就是按钮，其余视图看卡尾按钮 */
+  const tgtEl = S.view==='table' ? document.querySelector('.cft .btn') : card;
+  const tgtH = tgtEl ? Math.round(tgtEl.getBoundingClientRect().height) : 0;
+  const tgtOk = tgtH >= 48;
+  /* 本页实际占用格数 / 总格数。开了「末页铺满」时行数会收，读数里如实标出来 */
+  const gEl = document.querySelector('#grid,.single,.mgrid,.cgrid');
+  const gRows = gEl ? getComputedStyle(gEl).gridTemplateRows.split(' ').filter(Boolean).length : S.rows;
+  const used = Math.min(perPage, Math.max(0, src.length - S.page*perPage));
+  const rowNote = (gRows !== S.rows)
+    ? ` <span class="warn">实渲 ${gRows} 行（末页铺满）</span>`
+    : (used < perPage ? ` <span class="ok">本页占用 ${used}/${perPage} 格</span>` : '');
+  const viewName = viewLabel();
+  $('#readout').innerHTML =
+    `视口 <b>${innerWidth}×${innerHeight}</b> · DPR ${devicePixelRatio} · 视图 <b>${viewName}</b><br>`+
+    `密度 <b>${S.cols} 列 × ${S.rows} 行 = ${perPage} 卡/页</b>${rowNote}<br>`+
+    `卡片实际 <b>${cardW}×${cardH}</b> px<br>`+
+    `菜名字号 <b>${dishFs}</b>${extra}<br>`+
+    `共 <b>${src.length}</b> 条 / <b>${pageCount()}</b> 页<br>`+
+    `字号缩放 <b>${Math.round(S.scale*100)}%</b>（仅${viewName}） · 语言 <b>${langMeta().name}</b> <span class="${langMeta().len>=1.7?'warn':'ok'}">文本长度 ×${langMeta().len.toFixed(2)}</span><br>`+
+    `触摸目标 <b>${tgtH||'—'}</b>px ${tgtOk?'<span class="ok">达标</span>':'<span class="warn">低于 48px 触摸标准</span>'}`;
+}
+
+/* ============================================================================
+   10. 配置面板
+   ============================================================================ */
+function bindOpts(id, key, cast=v=>v){
+  $(id).querySelectorAll('button').forEach(b=>{
+    b.onclick = ()=>{
+      [...$(id).querySelectorAll('button')].forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      S[key] = cast(b.dataset.v);
+      S.page = 0;
+      if(key==='cols' || key==='rows'){
+        S.auto = false;
+        const sw = document.getElementById('swAuto');
+        if(sw) sw.classList.remove('on');
+        const cv = document.getElementById('colsV'), rv = document.getElementById('rowsV');
+        if(cv) cv.textContent = S.cols;
+        if(rv) rv.textContent = S.rows;
+      }
+      if(key==='lines') $('#app').classList.toggle('lines2', S.lines===2);
+      render();
+    };
+  });
+  // 初始态
+  [...$(id).querySelectorAll('button')].forEach(b=>{
+    b.classList.toggle('on', String(S[key])===b.dataset.v);
+  });
+}
+bindOpts('#optTheme','theme');
+bindOpts('#optLang','lang');
+bindOpts('#optLines','lines',Number);
+bindOpts('#optContrast','contrast');
+
+/* 视图切换：换视图时先存下当前视图的行列，再载入目标视图的，互不覆盖 */
+function setView(v){
+  if(v === S.view) return;
+  /* 存档当前视图的密度与字号；login 不参与，避免污染三视图的存档 */
+  if(S.view!=='login'){ S.dens[S.view] = {cols:S.cols, rows:S.rows}; S.fonts[S.view] = S.scale; }
+  S.view = v;
+  /* 载入目标视图的密度与字号 */
+  const d = S.dens[v] || DENS[v] || DENS.table;
+  S.cols = d.cols; S.rows = d.rows;
+  if(S.fonts[v] != null) S.scale = S.fonts[v];
+  S.page = 0;
+  buildDensityOpts();
+  syncFontUI();
+  syncViewOpts();
+  $('#colsLabel').textContent = v==='merge' ? '每行菜品数' : '每行卡片数';
+  render();
+}
+/* 字号滑块与数字永远显示「当前视图」的那一档；切视图时由 setView 调用 */
+function syncFontUI(){
+  const r = document.getElementById('fsRange'), v = document.getElementById('fsV');
+  if(r) r.value = S.scale;
+  if(v) v.textContent = Math.round(S.scale*100)+'%';
+  const fn = document.getElementById('fsNote');
+  if(fn) fn.textContent = viewLabel();
+}
+function syncViewOpts(){
+  $('#optView').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===S.view));
+}
+$('#optView').querySelectorAll('button').forEach(b=>{
+  b.onclick = ()=> setView(b.dataset.v);
+  b.classList.toggle('on', b.dataset.v===S.view);
+});
+
+/* 字号滑块：只改「当前视图」那一档，另外两个视图不受影响 */
+$('#fsRange').oninput = e => {
+  S.scale = Number(e.target.value);
+  if(S.view!=='login') S.fonts[S.view] = S.scale;
+  applyScale();
+  $('#fsV').textContent = Math.round(S.scale*100)+'%';
+  updateReadout(); setTimeout(audit,80);
+};
+/* 「套用到全部视图」：三视图各自独立，但总要给一个批量的出口 */
+$('#fsAll').onclick = e => {
+  ['table','merge','single','combo'].forEach(k=> S.fonts[k] = S.scale);
+  const src = S.view; scaleToast(e.currentTarget, src);
+};
+/* 按钮自身给一下按下的即时反馈：面板里没有其他提示位 */
+function scaleToast(btn, view){
+  const old = btn.textContent;
+  btn.textContent = t('fsApplied');
+  setTimeout(()=>{ btn.textContent = old; }, 1200);
+}
+
+$('#swAudit').onclick = e => {
+  S.audit = !S.audit;
+  e.currentTarget.classList.toggle('on', S.audit);
+  $('#app').classList.toggle('audit', S.audit);
+  audit();
+};
+
+$('#swAuto').onclick = e => {
+  S.auto = !S.auto;
+  e.currentTarget.classList.toggle('on', S.auto);
+  if(S.auto){ autoDensity(); render(); }
+};
+
+/* 末页铺满：关=卡片尺寸恒定（行数永远按设置生效）；开=末页收行放大铺满 */
+$('#swFill').onclick = e => {
+  S.fill = !S.fill;
+  e.currentTarget.classList.toggle('on', S.fill);
+  render();
+};
+/* 面板开关：遮罩一起管，点遮罩 / ✕ / Esc 都能关 */
+function setPanel(open){
+  $('#panel').classList.toggle('open', open);
+  $('#scrim').classList.toggle('on', open);
+  $('#fab').classList.toggle('on', open);
+  if(open) setTimeout(pnSyncJump, 60);
+}
+$('#fab').onclick = ()=> setPanel(!$('#panel').classList.contains('open'));
+$('#pnClose').onclick = ()=> setPanel(false);
+$('#scrim').onclick = ()=> setPanel(false);
+
+/* 分页 */
+$('#pgPrev').onclick = ()=>{ if(S.page>0){ S.page--; render(); } };
+$('#pgNext').onclick = ()=>{ if(S.page<pageCount()-1){ S.page++; render(); } };
+
+/* 面板上下翻屏：触摸屏没有滚轮，必须有按钮；到顶/到底自动置灰 */
+function pnJump(dir){
+  const bd = document.querySelector('.pn-bd');
+  bd.scrollBy({ top: dir * bd.clientHeight * 0.8, behavior:'smooth' });
+}
+function pnSyncJump(){
+  const bd = document.querySelector('.pn-bd');
+  if(!bd) return;
+  $('#pnUp').disabled  = bd.scrollTop <= 2;
+  $('#pnDown').disabled = bd.scrollTop + bd.clientHeight >= bd.scrollHeight - 2;
+}
+$('#pnUp').onclick = ()=> pnJump(-1);
+$('#pnDown').onclick = ()=> pnJump(1);
+document.querySelector('.pn-bd').addEventListener('scroll', pnSyncJump, {passive:true});
+window.addEventListener('resize', pnSyncJump);
+
+/* 键盘：← → 翻页，Esc 关面板 */
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ setPanel(false); openKB(false); }
+  /* 抽屉开着时，真键盘的输入也走 kbPress —— 另写一套必然分叉。
+     演示 / 走查时打字比戳屏快得多，这条捷径必须留着。 */
+  if(S.kb){ if(e.key!=='Escape') kbKeyFromKeyboard(e.key); return; }
+  /* 登录屏：真键盘也要能用。演示和走查时打字比戳触屏快得多，
+     而且它是唯一一屏「必须先输入才能看后面」的页面，卡住就卡在最前面。 */
+  if(S.view==='login'){
+    if(!loginPress) return;
+    if(/^[0-9]$/.test(e.key)) loginPress(e.key);
+    else if(e.key==='Backspace') loginPress('del');
+    else if(e.key==='Enter') loginPress('ok');
+    return;
+  }
+  if(S.view==='settings') return;   // 这两屏没有分页
+  if(e.key==='ArrowLeft' && S.page>0){ S.page--; render(); }
+  if(e.key==='ArrowRight' && S.page<pageCount()-1){ S.page++; render(); }
+});
+
+/* 视口变化：重算顶栏降级 + 重排菜品行 */
+let rt;
+window.addEventListener('resize', ()=>{
+  clearTimeout(rt);
+  rt = setTimeout(()=>{ render(); }, 150);
+});
+
+/* ============================================================================
+   11. 启动 —— 支持 ?theme=a|b &lang=de 等深链，便于对比页 iframe 直接嵌入
+   ============================================================================ */
+(function boot(){
+  const q = new URLSearchParams(location.search);
+  if(q.get('theme')) S.theme = q.get('theme');
+  if(q.get('lang')) S.lang = q.get('lang');
+  if(q.get('view')) S.view = q.get('view');
+  if(q.get('cols')) { S.cols = Number(q.get('cols')); S.auto = false; }
+  if(q.get('rows')) { S.rows = Number(q.get('rows')); S.auto = false; }
+  if(q.get('scale')) S.scale = Math.min(1.35, Math.max(0.75, Number(q.get('scale'))));
+  /* 深链里的行列 / 字号只写进「当前视图」，不污染其他视图的默认值 */
+  if(S.view!=='login' && S.view!=='settings'){
+    /* 深链没带行列时，用该视图自己的默认密度（综合屏是 8×6，不能拿桌台的 3×2 覆盖它） */
+    if(!q.get('cols') && !q.get('rows') && S.dens[S.view]){ S.cols = S.dens[S.view].cols; S.rows = S.dens[S.view].rows; }
+    else S.dens[S.view] = {cols:S.cols, rows:S.rows};
+    if(q.get('scale')) S.fonts[S.view] = S.scale;
+  }
+  /* 综合屏的三个对照开关也走深链，方便直接出对比图 */
+  if(q.get('comboLay')) S.comboLay = q.get('comboLay');
+  if(q.get('op')) S.comboOp = q.get('op');
+  if(q.get('sum')==='0') S.comboSum = false;
+  if(q.get('panel')==='1') setTimeout(()=>setPanel(true),300);
+  /* 键盘也走深链：对比页 / 截图脚本可以直接 ?kb=1&q=12 出静态图 */
+  if(q.get('kb')==='1') S.kb = true;
+  if(q.get('q')) S.q = cleanQ(q.get('q'));
+  if(q.get('audit')==='1'){ S.audit = true; $('#app').classList.add('audit'); }
+
+  buildKB();
+  // 面板控件初始态同步
+  $('#optTheme').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===S.theme));
+  $('#optLang').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===S.lang));
+  if(q.get('fill')==='1') S.fill = true;
+  if(!S.auto) document.getElementById('swAuto').classList.remove('on');
+  document.getElementById('swFill').classList.toggle('on', S.fill);
+  $('#colsLabel').textContent = S.view==='merge' ? '每行菜品数' : '每行卡片数';
+  buildDensityOpts();
+  syncFontUI();
+  syncViewOpts();
+
+  render();
+  // 字体加载完成后重排一次（阿拉伯语/俄语回退字体度量差异）
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{ render(); });
+
+  // 调试：?debug=1 输出关键计算样式，供无头截图核对
+  if(q.get('debug')==='1'){
+    setTimeout(()=>{
+      const r = document.querySelector('.tcard.tone-timeout .rname');
+      const out = document.createElement('pre'); out.id='DBGOUT';
+      if(r){
+        const cs = getComputedStyle(r), cc = getComputedStyle(r.closest('.tcard'));
+        const cw = r.closest('.tcard').clientWidth, ch = r.closest('.tcard').clientHeight;
+        out.textContent = `color=${cs.color} | fs=${cs.fontSize} | card=${cw}x${ch} | calc_cqw=${(0.05*cw).toFixed(1)} calc_cqh=${(0.086*ch).toFixed(1)} | scale=${getComputedStyle(document.documentElement).getPropertyValue('--fs-scale')}`;
+        let rep='';
+        document.querySelectorAll('.cbd').forEach((b,idx)=>{
+          const kids=[...b.children].map(k=>Math.round(k.getBoundingClientRect().height));
+          rep += idx+':h='+b.clientHeight+' scroll='+b.scrollHeight+' rows='+kids.join(',')+' | ';
+        });
+        out.textContent += String.fromCharCode(10) + rep;
+      } else out.textContent='no node';
+
+      /* 对比度自检：把关键「文字色 × 背景色」对算成 WCAG 比值，直接看数 */
+      const RGB = c => (c.match(/[\d.]+/g)||[0,0,0]).slice(0,3).map(Number);
+      const lum = c => { const [r,g,b]=RGB(c).map(v=>v/255)
+        .map(v=>v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4));
+        return 0.2126*r+0.7152*g+0.0722*b; };
+      const ratio = (f,b)=>{ const a=lum(f),c=lum(b); const hi=Math.max(a,c),lo=Math.min(a,c); return (hi+0.05)/(lo+0.05); };
+      const panel = document.getElementById('panel');
+      const pcs = getComputedStyle(panel);
+      const pair = (label, fgEl, bgEl) => {
+        const f = getComputedStyle(fgEl).color, b = getComputedStyle(bgEl).backgroundColor;
+        return `${label} ${ratio(f,b).toFixed(2)}`;
+      };
+      const lines = [
+        `panel-bg=${pcs.backgroundColor} alpha_ok=${!/rgba\([^)]*,\s*0?\.\d+\)/.test(pcs.backgroundColor)}`,
+        `theme=${document.documentElement.dataset.theme} | html-vars=${getComputedStyle(document.documentElement).getPropertyValue('--bg-surface').trim()}`,
+        pair('panelTitle', panel.querySelector('.pn-hd b'), panel),
+        pair('panelLabel', panel.querySelector('.grp>label'), panel),
+        pair('panelOpt', panel.querySelector('.opts button'), panel),
+        pair('panelTip', panel.querySelector('.pn-tip'), panel),
+        pair('readout', panel.querySelector('.readout'), panel.querySelector('.readout')),
+        pair('cardDish', document.querySelector('.rname')||document.body, document.querySelector('.tcard')||document.body),
+        pair('dishSub', document.querySelector('.rline2')||document.body, document.querySelector('.tcard')||document.body),
+        pair('dishWait', document.querySelector('.rwait')||document.body, document.querySelector('.tcard')||document.body),
+        pair('badge', document.querySelector('.badge')||document.body, document.querySelector('.badge')||document.body),
+        pair('cardMeta', document.querySelector('.ccnt')||document.body, document.querySelector('.tcard')||document.body),
+        pair('topSub', document.querySelector('.brand span')||document.body, document.querySelector('.top')||document.body),
+        pair('pagerInfo', document.querySelector('.pg-info')||document.body, document.querySelector('.pager')||document.body)
+      ].join(' | ');
+      out.textContent += String.fromCharCode(10) + lines;
+      document.body.appendChild(out);
+    }, 600);
+  }
+})();
+</script>
+</body>
+</html>

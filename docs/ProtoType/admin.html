@@ -1,0 +1,1568 @@
+<!DOCTYPE html>
+<!-- ==========================================================================
+     KDS 管理端原型（B-03 概览看板 / B-04 日报 / B-18 健康检查 + B-19 路由矩阵 / B-02 初始化向导）
+     URL：admin.html?view=dash|report|health|wizard&theme=a|b&lang=zh|zh-TW|en|de|ru|ar
+     （lang 同时接受旧写法 yue，以及 zh-Hant / zh-HK —— 都指向同一份繁體詞典）
+
+     与作业屏 app.html 的关系：
+     - 复用同一套颜色令牌（core.css 兜底 + theme-a / theme-b 覆盖），主题靠 <html data-theme> 切换；
+     - 不复用作业屏的结构类（.top / .btn / .card …），管理端全部 adm- 前缀，两条线互不影响；
+     - 范式不同：作业屏是触屏（行高 48–86px），管理端是桌面鼠标（控件 34px / 正文 14px）。
+     ========================================================================== -->
+<html lang="zh-CN" dir="ltr" data-theme="a">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KDS 管理端 · 原型</title>
+<!-- 主题挂 <html>：令牌变量必须能被所有元素取到，挂在容器上会让浮层/提示条取不到变量。 -->
+<link rel="stylesheet" href="css/core.css">
+<link rel="stylesheet" href="css/theme-a.css">
+<link rel="stylesheet" href="css/theme-b.css">
+<!-- 管理端自有样式必须在主题之后：它定义 --adm-* 语义别名指向令牌，顺序反了不会报错但可读性变差 -->
+<link rel="stylesheet" href="css/admin.css">
+<script>
+/* 首屏防闪：在样式生效前就把 data-theme / lang / dir 写到 <html> 上。
+   原型里不做持久化，但避免「先浅色一帧再变深色」的跳变。 */
+(function(){
+  var q=new URLSearchParams(location.search);
+  var th=q.get('theme'); document.documentElement.setAttribute('data-theme', (th==='b'?'b':'a'));
+  var lg=q.get('lang'); if(!lg) lg='zh';
+  if(/^zh-(tw|hant|hk)/i.test(lg)) lg='yue';          /* 对外接受 BCP-47，内部 key 仍是 'yue' */
+  var M={zh:['zh-CN','ltr'],yue:['zh-TW','ltr'],en:['en','ltr'],de:['de','ltr'],ru:['ru','ltr'],ar:['ar','rtl']};
+  var m=M[lg]||M.zh;
+  document.documentElement.setAttribute('lang',m[0]);
+  document.documentElement.setAttribute('dir',m[1]);
+})();
+</script>
+</head>
+<body>
+
+<div id="adm" class="adm">
+  <!-- ===================== 顶栏（固定） ===================== -->
+  <header class="adm-top">
+    <div class="adm-brand">
+      <b id="admProd">KDS 管理端</b>
+      <span id="admShop"></span>
+    </div>
+    <div class="adm-top-sp"></div>
+    <div class="adm-cluster">
+      <span class="adm-clabel" id="admLangLbl">语言</span>
+      <div class="adm-seg" id="admLang" role="group" aria-label="语言"></div>
+      <span class="adm-vsep"></span>
+      <span class="adm-clabel" id="admThemeLbl">主题</span>
+      <div class="adm-seg" id="admTheme" role="group" aria-label="主题">
+        <button type="button" data-act="theme" data-v="a">A 夜航</button>
+        <button type="button" data-act="theme" data-v="b">B 晨光</button>
+      </div>
+      <span class="adm-vsep"></span>
+      <!-- 评审对照位（虚线框）：切换「鼠标范式 / 触控范式」。
+           真机是触摸屏时会自动进触控，这里只是让人在任意设备上都能比两种形态。 -->
+      <span class="adm-clabel" id="admInputLbl">输入</span>
+      <div class="adm-seg review" id="admInput" role="group" aria-label="输入方式（评审对照位）">
+        <button type="button" data-act="input" data-v="mouse">鼠标</button>
+        <button type="button" data-act="input" data-v="touch">触控</button>
+      </div>
+      <span class="adm-vsep"></span>
+      <div class="adm-clock">
+        <span class="v" id="admUpdated"></span>
+        <span class="ttl" id="admTtl"></span>
+      </div>
+      <button type="button" class="adm-iconbtn" id="admRefresh" data-act="refresh" title="刷新">⟳</button>
+    </div>
+  </header>
+
+  <!-- ===================== 主体：侧栏固定 + 内容区滚动 ===================== -->
+  <div class="adm-main">
+    <nav class="adm-nav" id="admNav" aria-label="主导航"></nav>
+    <main class="adm-content" id="admContent"></main>
+  </div>
+</div>
+
+<!-- 提示条：原型里所有「点击后的反馈」都走这里，不用 alert（alert 会打断评审节奏且无法截图） -->
+<div class="adm-toast" id="admToast" role="status" aria-live="polite">
+  <span class="ico" aria-hidden="true">i</span><span class="tx" id="admToastTx"></span>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ==========================================================================
+   1. 状态与 URL 参数
+   ========================================================================== */
+const VIEWS = ['dash','report','health','wizard'];
+const S = {
+  view : 'dash',
+  theme: 'a',
+  lang : 'zh',
+  range: 'd7',      /* dash 时间档：d1 今天 / d5 最近5日 / d7 最近7日 / d30 最近30日 */
+  drinks: true,     /* 是否单独给酒水 TOP 子榜 —— 本屏的核心决策开关 */
+  step : 1,         /* wizard 当前步 */
+  engine:'sqlite',  /* 数据库引擎：sqlite | sqlsrv */
+  matrix: true,     /* B-19 路由矩阵下钻面板默认展开（评审要一眼看到，不藏起来） */
+  dbTest: null,     /* null=未测试 / 'ok' / 'fail' */
+  /* 输入方式：mouse | touch。
+     默认按真机指针类型判定 —— 管理端既是店里那台触摸一体机上的页面，也是办公室电脑上的页面，
+     同一个 URL 要给两拨人各自合适的密度。屏上对照位可以手动覆盖。 */
+  input: (window.matchMedia && window.matchMedia('(pointer:coarse)').matches) ? 'touch' : 'mouse'
+};
+(function readQuery(){
+  const q = new URLSearchParams(location.search);
+  if(VIEWS.indexOf(q.get('view'))>=0) S.view = q.get('view');
+  if(q.get('theme')==='b' || q.get('theme')==='a') S.theme = q.get('theme');
+  const _lg = q.get('lang');
+  /* 对外接受 BCP-47（zh-TW / zh-Hant / zh-HK），内部 key 仍是 'yue' */
+  if(_lg) S.lang = (/^zh-(tw|hant|hk)/i.test(_lg) ? 'yue' : _lg);
+  if(q.get('input')==='touch' || q.get('input')==='mouse') S.input = q.get('input');
+})();
+
+/* ==========================================================================
+   2. 语言元数据
+   len = 相对中文的文本膨胀系数（排版按最坏的 2.3 预留）。
+   tag 一律 BCP-47 并与 KDS-09 §11 对齐：zh-CN / **zh-TW** / en / de / ru / ar。
+   繁体不能写裸 'zh-Hant' 或 'yue'：前者不含地区、后者只声明语种不带文字系统，
+   浏览器仍可能按简体字形回退，正体字要靠明确的 zh-TW 才稳。
+   注：内部 key 沿用 'yue' 只是历史包袱（旧深链 ?lang=yue 要继续能用），对外以 tag 为准。
+   ========================================================================== */
+const LANG_META = {
+  zh :{tag:'zh-CN',       dir:'ltr', len:1.00, name:'简体中文', short:'中文'},
+  yue:{tag:'zh-TW',       dir:'ltr', len:1.05, name:'繁體中文', short:'繁體'},
+  en :{tag:'en',          dir:'ltr', len:1.70, name:'English',  short:'EN'},
+  de :{tag:'de',          dir:'ltr', len:2.20, name:'Deutsch',  short:'DE'},
+  ru :{tag:'ru',          dir:'ltr', len:2.30, name:'Русский',  short:'RU'},
+  ar :{tag:'ar',          dir:'rtl', len:1.35, name:'العربية',  short:'AR'}
+};
+const meta = () => LANG_META[S.lang] || LANG_META.zh;
+
+/* ==========================================================================
+   3. 词典
+   每屏只挑最关键 UI 文案 + 会随语言变化的数据（品项名 / 档口名 / 检查项名）。
+   未命中的 key 回落到中文，保证新增语言时不会整屏变 key 名。
+   ========================================================================== */
+const T = {
+
+/* ---------------------------------------------------------------- zh ------ */
+zh:{
+  c_product:'KDS 管理端', c_shop:'示例店 · 中山路店',
+  c_navOps:'运营', c_navCfg:'配置',
+  c_navDash:'概览看板', c_navReport:'日报', c_navHealth:'健康检查', c_navWizard:'初始化向导',
+  c_navMenu:'菜单管理', c_navPrinter:'打印机', c_soon:'未实现',
+  c_input:'输入', c_inMouse:'鼠标', c_inTouch:'触控', c_theme:'主题', c_themeA:'A 夜航', c_themeB:'B 晨光', c_lang:'语言',
+  c_updated:'数据更新于 {t}', c_ttl:'TTL 5 分钟', c_refresh:'刷新数据',
+  c_go:'去处理', c_cfg:'去配置', c_export:'导出', c_fold:'收起', c_unfold:'展开',
+  c_rank:'排名', c_item:'品项', c_cat:'分类', c_qty:'销量', c_amt:'金额', c_total:'合计',
+
+  d_title:'概览看板', d_sub:'门店运营实时概览 · 用于例会复盘与现场调度',
+  d_k1:'待制作', d_k2:'平均出品时长', d_k3:'超时数', d_k4:'退单数', d_k5:'报损数',
+  u_order:'单', u_min:'分钟', u_portion:'份', d_vs:'较上一周期',
+  d_r1:'今天', d_r5:'最近5日', d_r7:'最近7日', d_r30:'最近30日',
+  d_trend:'平均出品时长趋势', d_trendNote:'近 14 日 · 单位：分钟 · 虚线为 10 分钟目标线',
+  d_load:'档口负荷', d_loadNote:'在制量 / 档口产能，超过 80% 转黄',
+  d_alert:'异常提醒', d_alertNote:'常驻模块，无异常时显示 0，不使用折叠',
+  a1:'跨日未完成', a2:'沽清待确认', a3:'打印积压', a4:'归档失败',
+  d_rankAll:'销量排行榜 · 全品类 TOP10', d_rankNote:'含饮品酒水，饮品以圆点标注',
+  d_rankDrinks:'酒水 TOP', d_rankDrinkNote:'独立子榜，避免饮品挤占招牌菜',
+  d_split:'单独显示酒水子榜',
+  d_splitHint:'不分子榜时可乐会挤掉招牌菜，容易误判',
+  d_chartLine:'折线图：近 14 日平均出品时长趋势',
+  d_chartBar:'横向条形图：6 个档口的当前负荷',
+  d_axisDay:'日', d_target:'目标 10 分钟',
+
+  r_title:'日报', r_sub:'单日经营明细与损耗归因',
+  r_loss:'损耗总览', r_lossRet:'退菜', r_lossWaste:'报损', r_lossTotal:'合计',
+  r_lossFormula:'合计 = 退菜 + 报损',
+  r_date:'日期', r_export:'导出 CSV',
+  r_colItem:'品项', r_colCat:'分类', r_colQty:'销量', r_colRet:'退菜数', r_colWaste:'报损数', r_colAmt:'金额',
+  r_cur:'¥',
+
+  h_title:'健康检查', h_sub:'上线前自检 · 共 30 项，Error 必须清零才能保存',
+  h_err:'Error', h_warn:'Warn', h_info:'Info', h_ok:'通过',
+  h_block:'Error 阻断保存', h_pass:'通过 {x}/{n}',
+  g_route:'路由', g_print:'打印', g_lang:'语言', g_db:'数据库',
+  h_fix:'去修复', h_cfg:'去配置', h_toast:'跳转到「{p}」配置页并定位到「{a}」',
+  p_route:'档口路由', p_print:'打印配置', p_lang:'语言与翻译', p_db:'数据库',
+  h_exportCsv:'导出 CSV', h_exportPdf:'导出 PDF', h_sign:'门店签字留档',
+  h_mx:'B-19 路由矩阵', h_mxBtn:'路由矩阵', h_mxNote:'与自检共用同一解析器',
+  h_mxSub:'行为单据 / 事件类型，列为目标档口 / 终端',
+  mx1:'下单', mx2:'加菜', mx3:'退菜', mx4:'划单', mx5:'催菜', mx6:'叫号', mx7:'换台', mx8:'并台', mx9:'沽清', mx10:'结账',
+  mc1:'热菜档', mc2:'凉菜档', mc3:'烧烤档', mc4:'面点档', mc5:'饮品档', mc6:'前台收银',
+  lg1:'● 已配置', lg2:'◐ 部分配置', lg3:'○ 未配置', lg4:'●! 配置有误',
+
+  w_title:'初始化向导', w_sub:'五步完成门店上线配置，可随时退出后重入',
+  w_skip:'跳过后补', w_prev:'上一步', w_next:'下一步', w_finish:'完成安装',
+  w_s1:'语言地区', w_s2:'门店信息', w_s3:'数据库', w_s4:'营业日与餐段', w_s5:'创建管理员',
+  w_lang:'界面语言', w_langHint:'影响全部终端、打印模板与导出文件',
+  w_tz:'时区', w_tzHint:'取本机时区，不可修改：配错会让所有时长统计偏移',
+  w_shopName:'门店名称', w_code:'门店编码', w_codeWarn:'创建后不可修改',
+  w_codeConfirm:'门店编码创建后不可修改，请与总部下发编码核对一致后再继续',
+  w_biz:'业态', w_bizHint:'仅预设默认值，不改变功能',
+  bz1:'正餐', bz2:'快餐', bz3:'火锅', bz4:'饮品',
+  w_addr:'地址', w_tel:'联系电话',
+  w_engine:'数据库引擎', w_host:'服务器地址', w_port:'端口', w_dbname:'库名', w_user:'账号', w_pwd:'密码',
+  w_sqlite:'SQLite', w_sqliteNote:'单机，零配置', w_sqlsrv:'SQL Server', w_sqlsrvNote:'连锁，需服务器',
+  w_test:'测试连接', w_testOk:'连接成功：延迟 12 ms，版本匹配', w_testFail:'连接失败：无法解析主机，请检查地址与端口',
+  w_dayStart:'营业日起始时间', w_dayHint:'早于此时间的订单归入前一营业日',
+  w_seg:'餐段', w_segHint:'未启用的餐段不参与出品时长统计',
+  wg1:'早餐', wg2:'午餐', wg3:'下午茶', wg4:'晚餐', wg5:'夜宵',
+  w_adminTitle:'创建管理员', w_name:'姓名', w_empno:'工号', w_mobile:'手机', w_pwd:'密码', w_pwd2:'确认密码',
+  w_prog1:'建库', w_prog2:'结构迁移', w_prog3:'种子数据', w_retry:'重试', w_progFail:'失败',
+  w_resume:'上次未完成：已建库，从数据库步骤继续',
+  w_resumeHint:'中途失败或退出可重新进入，向导记住已完成步骤并从断点继续',
+  w_done:'安装完成，正在进入管理端首页',
+
+  n_gongbao:'宫保鸡丁', n_shuizhu:'水煮鱼', n_coke:'可乐', n_mabo:'麻婆豆腐', n_huacai:'干锅花菜',
+  n_orange:'鲜榨橙汁', n_beef:'番茄牛腩', n_shrimp:'蒜蓉粉丝蒸虾', n_rice:'米饭', n_cucumber:'拍黄瓜',
+  n_letea:'冰柠檬茶', n_beer:'鲜啤', n_yogurt:'自制酸奶', n_fish:'清蒸鲈鱼', n_noodle:'担担面', n_soup:'例汤',
+  cat_hot:'热菜', cat_cold:'凉菜', cat_staple:'主食', cat_drink:'饮品酒水',
+  st1:'热菜档', st2:'凉菜档', st3:'烧烤档', st4:'面点档', st5:'饮品档', st6:'出品口',
+
+  hi:{
+    route:[
+      ['下单 → 热菜档','下单事件已绑定热菜档，超时阈值 8 分钟'],
+      ['加菜 → 热菜档','加菜继承原单档口，无需单独配置'],
+      ['退菜 → 出品口','退菜未路由到出品口，前台收不到退菜回执'],
+      ['划单 → 传菜口','绑定 2 个终端，其中 1 个离线'],
+      ['催菜 → 全部档口','催菜为广播事件，全部档口同步提醒'],
+      ['叫号 → 前台','叫号事件绑定前台取餐屏'],
+      ['换台 → 点单机','3 台点单机中仅 2 台收到换台事件'],
+      ['并台 → 点单机','并台事件已绑定全部点单机'],
+      ['沽清 → 全部档口','沽清为广播事件，不可单独停用'],
+      ['结账 → 收银','结账事件绑定收银终端']
+    ],
+    print:[
+      ['热菜档打印机','HP-Laser-01 在线，纸宽 80 mm'],
+      ['凉菜档打印机','未检测到打印机，凉菜单当前走热菜档'],
+      ['饮品档打印机','队列积压 12 张，最近 1 小时未出单'],
+      ['前台小票打印机','在线，已设为默认小票机'],
+      ['厨房总单打印','在线，总单模板 v3'],
+      ['打印模板绑定','6 个档口均已绑定出单模板'],
+      ['打印队列归档','历史积压已归档，保留 30 天']
+    ],
+    lang:[
+      ['简体中文','词条 1240 / 1240，无缺失'],
+      ['繁體中文（香港）','词条 1240 / 1240，无缺失'],
+      ['English','缺失 6 条，集中在导出文件表头'],
+      ['Deutsch','缺失 18 条，集中在报表页'],
+      ['Русский','缺失 24 条，集中在向导页'],
+      ['العربية','词条完整，RTL 镜像已验证'],
+      ['RTL 布局镜像','阿拉伯语下侧栏与表格已镜像，图表数值轴保持原方向'],
+      ['字体回退链','简体 / 繁体 / 阿拉伯字形栈均已命中'],
+      ['数字与日期格式','部分终端仍用 yyyy/MM/dd，与门店习惯不一致']
+    ],
+    db:[
+      ['数据库连接','SQLite 本地库，延迟 3 ms'],
+      ['表结构版本','当前 v12，期望 v14，需执行迁移'],
+      ['归档任务','最近一次归档在 3 天前，建议每日执行'],
+      ['备份策略','每日 03:00 全量备份，保留 14 天']
+    ]
+  }
+},
+
+/* ------------------------------------------------------- yue（tag: zh-TW）--
+   正體字形 + 港式餐飲用詞（落單／併檯／走單／起菜／執碼／檔口）。
+   不是把簡體轉繁體就算完：詞彙層面大量不同，否則港澳同事讀起來彆扭。 */
+yue:{
+  c_product:'KDS 管理端', c_shop:'示範店 · 中山路店',
+  c_navOps:'營運', c_navCfg:'設定',
+  c_navDash:'概覽看板', c_navReport:'日報', c_navHealth:'健康檢查', c_navWizard:'初始化精靈',
+  c_navMenu:'餐牌管理', c_navPrinter:'打印機', c_soon:'未實作',
+  c_input:'輸入', c_inMouse:'滑鼠', c_inTouch:'觸控', c_theme:'主題', c_themeA:'A 夜航', c_themeB:'B 晨光', c_lang:'語言',
+  c_updated:'數據更新於 {t}', c_ttl:'TTL 5 分鐘', c_refresh:'刷新數據',
+  c_go:'去處理', c_cfg:'去設定', c_export:'匯出', c_fold:'收起', c_unfold:'展開',
+  c_rank:'排名', c_item:'品項', c_cat:'分類', c_qty:'銷量', c_amt:'金額', c_total:'合計',
+
+  d_title:'概覽看板', d_sub:'門店營運即時概覽 · 用於例會檢討與現場調度',
+  d_k1:'待整', d_k2:'平均出餐時間', d_k3:'超時數', d_k4:'退單數', d_k5:'報損數',
+  u_order:'張', u_min:'分鐘', u_portion:'份', d_vs:'較上一週期',
+  d_r1:'今天', d_r5:'最近5日', d_r7:'最近7日', d_r30:'最近30日',
+  d_trend:'平均出餐時間趨勢', d_trendNote:'近 14 日 · 單位：分鐘 · 虛線為 10 分鐘目標線',
+  d_load:'檔口負荷', d_loadNote:'在製量 / 檔口產能，超過 80% 轉黃',
+  d_alert:'異常提醒', d_alertNote:'常駐模組，無異常時顯示 0，不使用摺疊',
+  a1:'跨日未完成', a2:'沽清待確認', a3:'打印積壓', a4:'歸檔失敗',
+  d_rankAll:'銷量排行榜 · 全品類 TOP10', d_rankNote:'含飲品酒水，飲品以圓點標註',
+  d_rankDrinks:'酒水 TOP', d_rankDrinkNote:'獨立子榜，避免飲品擠佔招牌菜',
+  d_split:'單獨顯示酒水子榜',
+  d_splitHint:'不分子榜時可樂會擠掉招牌菜，容易誤判',
+  d_chartLine:'折線圖：近 14 日平均出餐時間趨勢',
+  d_chartBar:'橫向條形圖：6 個檔口的當前負荷',
+  d_axisDay:'日', d_target:'目標 10 分鐘',
+
+  r_title:'日報', r_sub:'單日經營明細與損耗歸因',
+  r_loss:'損耗總覽', r_lossRet:'退菜', r_lossWaste:'報損', r_lossTotal:'合計',
+  r_lossFormula:'合計 = 退菜 + 報損',
+  r_date:'日期', r_export:'匯出 CSV',
+  r_colItem:'品項', r_colCat:'分類', r_colQty:'銷量', r_colRet:'退菜數', r_colWaste:'報損數', r_colAmt:'金額',
+  r_cur:'HK$',
+
+  h_title:'健康檢查', h_sub:'上線前自檢 · 共 30 項，Error 必須清零才可儲存',
+  h_err:'Error', h_warn:'Warn', h_info:'Info', h_ok:'通過',
+  h_block:'Error 阻斷儲存', h_pass:'通過 {x}/{n}',
+  g_route:'路由', g_print:'打印', g_lang:'語言', g_db:'資料庫',
+  h_fix:'去修復', h_cfg:'去設定', h_toast:'跳轉到「{p}」設定頁並定位到「{a}」',
+  p_route:'檔口路由', p_print:'打印設定', p_lang:'語言與翻譯', p_db:'資料庫',
+  h_exportCsv:'匯出 CSV', h_exportPdf:'匯出 PDF', h_sign:'門店簽字留檔',
+  h_mx:'B-19 路由矩陣', h_mxBtn:'路由矩陣', h_mxNote:'與自檢共用同一解析器',
+  h_mxSub:'行為單據 / 事件類型，列為目標檔口 / 終端',
+  mx1:'落單', mx2:'加菜', mx3:'退菜', mx4:'劃單', mx5:'催菜', mx6:'叫號', mx7:'轉檯', mx8:'併檯', mx9:'沽清', mx10:'結帳',
+  mc1:'熱菜檔', mc2:'凍菜檔', mc3:'燒烤檔', mc4:'點心檔', mc5:'飲品檔', mc6:'前台收銀',
+  lg1:'● 已設定', lg2:'◐ 部分設定', lg3:'○ 未設定', lg4:'●! 設定有誤',
+
+  w_title:'初始化精靈', w_sub:'五步完成門店上線設定，可隨時退出後重入',
+  w_skip:'跳過後補', w_prev:'上一步', w_next:'下一步', w_finish:'完成安裝',
+  w_s1:'語言地區', w_s2:'門店資料', w_s3:'資料庫', w_s4:'營業日與餐段', w_s5:'建立管理員',
+  w_lang:'介面語言', w_langHint:'影響全部終端、打印範本與匯出檔案',
+  w_tz:'時區', w_tzHint:'取本機時區，不可修改：配錯會令所有時長統計偏移',
+  w_shopName:'門店名稱', w_code:'門店編號', w_codeWarn:'建立後不可修改',
+  w_codeConfirm:'門店編號建立後不可修改，請與總部下發編號核對一致後再繼續',
+  w_biz:'業態', w_bizHint:'僅預設預設值，不改變功能',
+  bz1:'正餐', bz2:'快餐', bz3:'火鍋', bz4:'飲品',
+  w_addr:'地址', w_tel:'聯絡電話',
+  w_engine:'資料庫引擎', w_host:'伺服器地址', w_port:'埠', w_dbname:'庫名', w_user:'帳號', w_pwd:'密碼',
+  w_sqlite:'SQLite', w_sqliteNote:'單機，零設定', w_sqlsrv:'SQL Server', w_sqlsrvNote:'連鎖，需伺服器',
+  w_test:'測試連線', w_testOk:'連線成功：延遲 12 ms，版本匹配', w_testFail:'連線失敗：無法解析主機，請檢查地址與埠',
+  w_dayStart:'營業日開始時間', w_dayHint:'早於此時間的訂單歸入前一營業日',
+  w_seg:'餐段', w_segHint:'未啟用的餐段不參與出餐時間統計',
+  wg1:'早餐', wg2:'午餐', wg3:'下午茶', wg4:'晚餐', wg5:'宵夜',
+  w_adminTitle:'建立管理員', w_name:'姓名', w_empno:'工號', w_mobile:'手機', w_pwd:'密碼', w_pwd2:'確認密碼',
+  w_prog1:'建庫', w_prog2:'結構遷移', w_prog3:'種子資料', w_retry:'重試', w_progFail:'失敗',
+  w_resume:'上次未完成：已建庫，從資料庫步驟繼續',
+  w_resumeHint:'中途失敗或退出可重新進入，精靈記住已完成步驟並從斷點繼續',
+  w_done:'安裝完成，正在進入管理端首頁',
+
+  n_gongbao:'宮保雞丁', n_shuizhu:'水煮魚', n_coke:'可樂', n_mabo:'麻婆豆腐', n_huacai:'乾鍋花菜',
+  n_orange:'鮮榨橙汁', n_beef:'番茄牛腩', n_shrimp:'蒜蓉粉絲蒸蝦', n_rice:'白飯', n_cucumber:'拍青瓜',
+  n_letea:'凍檸檬茶', n_beer:'生啤', n_yogurt:'自製乳酪', n_fish:'清蒸鱸魚', n_noodle:'擔擔麵', n_soup:'例湯',
+  cat_hot:'熱菜', cat_cold:'凍菜', cat_staple:'主食', cat_drink:'飲品酒水',
+  st1:'熱菜檔', st2:'凍菜檔', st3:'燒烤檔', st4:'點心檔', st5:'飲品檔', st6:'出菜口',
+
+  hi:{
+    route:[
+      ['落單 → 熱菜檔','落單事件已綁定熱菜檔，超時閾值 8 分鐘'],
+      ['加菜 → 熱菜檔','加菜繼承原單檔口，無需單獨設定'],
+      ['退菜 → 出菜口','退菜未路由到出菜口，前台收不到退菜回執'],
+      ['劃單 → 傳菜口','綁定 2 個終端，其中 1 個離線'],
+      ['催菜 → 全部檔口','催菜為廣播事件，全部檔口同步提醒'],
+      ['叫號 → 前台','叫號事件綁定前台取餐屏'],
+      ['轉檯 → 落單機','3 部落單機中僅 2 部收到轉檯事件'],
+      ['併檯 → 落單機','併檯事件已綁定全部落單機'],
+      ['沽清 → 全部檔口','沽清為廣播事件，不可單獨停用'],
+      ['結帳 → 收銀','結帳事件綁定收銀終端']
+    ],
+    print:[
+      ['熱菜檔打印機','HP-Laser-01 在線，紙寬 80 mm'],
+      ['凍菜檔打印機','未偵測到打印機，凍菜單現時走熱菜檔'],
+      ['飲品檔打印機','隊列積壓 12 張，最近 1 小時未出單'],
+      ['前台小票打印機','在線，已設為預設小票機'],
+      ['廚房總單打印','在線，總單範本 v3'],
+      ['打印範本綁定','6 個檔口均已綁定出單範本'],
+      ['打印隊列歸檔','歷史積壓已歸檔，保留 30 天']
+    ],
+    lang:[
+      ['簡體中文','詞條 1240 / 1240，無缺失'],
+      ['繁體中文（香港）','詞條 1240 / 1240，無缺失'],
+      ['English','缺失 6 條，集中在匯出檔案表頭'],
+      ['Deutsch','缺失 18 條，集中在報表頁'],
+      ['Русский','缺失 24 條，集中在精靈頁'],
+      ['العربية','詞條完整，RTL 鏡像已驗證'],
+      ['RTL 版面鏡像','阿拉伯語下側欄與表格已鏡像，圖表數值軸保持原方向'],
+      ['字型回退鏈','簡體 / 繁體 / 阿拉伯字型棧均已命中'],
+      ['數字與日期格式','部分終端仍用 yyyy/MM/dd，與門店習慣不一致']
+    ],
+    db:[
+      ['資料庫連線','SQLite 本地庫，延遲 3 ms'],
+      ['資料表結構版本','目前 v12，期望 v14，需執行遷移'],
+      ['歸檔工作','最近一次歸檔在 3 天前，建議每日執行'],
+      ['備份策略','每日 03:00 全量備份，保留 14 天']
+    ]
+  }
+},
+
+/* ---------------------------------------------------------------- en ------ */
+en:{
+  c_product:'KDS Admin', c_shop:'Demo Store · Zhongshan Rd.',
+  c_navOps:'Operations', c_navCfg:'Configuration',
+  c_navDash:'Dashboard', c_navReport:'Daily Report', c_navHealth:'Health Check', c_navWizard:'Setup Wizard',
+  c_navMenu:'Menu', c_navPrinter:'Printers', c_soon:'TBD',
+  c_input:'Input', c_inMouse:'Mouse', c_inTouch:'Touch', c_theme:'Theme', c_themeA:'A Night', c_themeB:'B Daylight', c_lang:'Language',
+  c_updated:'Updated at {t}', c_ttl:'TTL 5 min', c_refresh:'Refresh',
+  c_go:'Resolve', c_cfg:'Open', c_export:'Export', c_fold:'Collapse', c_unfold:'Expand',
+  c_rank:'#', c_item:'Item', c_cat:'Category', c_qty:'Sold', c_amt:'Amount', c_total:'Total',
+
+  d_title:'Overview Dashboard', d_sub:'Live store overview for shift review and on-site dispatch',
+  d_k1:'In Queue', d_k2:'Avg. Prep Time', d_k3:'Overdue', d_k4:'Returned', d_k5:'Wasted',
+  u_order:'orders', u_min:'min', u_portion:'portions', d_vs:'vs. previous period',
+  d_r1:'Today', d_r5:'Last 5 days', d_r7:'Last 7 days', d_r30:'Last 30 days',
+  d_trend:'Average Prep Time Trend', d_trendNote:'Last 14 days · minutes · dashed = 10 min target',
+  d_load:'Station Load', d_loadNote:'Work in progress / station capacity; turns amber above 80%',
+  d_alert:'Exception Alerts', d_alertNote:'Always visible. Shows 0 when clear — never collapsed',
+  a1:'Open across day rollover', a2:'Sold-out awaiting confirm', a3:'Print backlog', a4:'Archive failed',
+  d_rankAll:'Best Sellers · All Categories TOP10', d_rankNote:'Drinks included; marked with a dot',
+  d_rankDrinks:'Drinks TOP', d_rankDrinkNote:'Separate board so drinks do not crowd out signature dishes',
+  d_split:'Show a separate drinks board',
+  d_splitHint:'Without it, cola pushes signature dishes down the list and misleads the reader',
+  d_chartLine:'Line chart: average prep time over the last 14 days',
+  d_chartBar:'Horizontal bars: current load of 6 kitchen stations',
+  d_axisDay:'d', d_target:'Target 10 min',
+
+  r_title:'Daily Report', r_sub:'Single-day sales detail and loss attribution',
+  r_loss:'Loss Overview', r_lossRet:'Returned', r_lossWaste:'Wasted', r_lossTotal:'Total',
+  r_lossFormula:'Total = Returned + Wasted',
+  r_date:'Date', r_export:'Export CSV',
+  r_colItem:'Item', r_colCat:'Category', r_colQty:'Sold', r_colRet:'Returned', r_colWaste:'Wasted', r_colAmt:'Amount',
+  r_cur:'$',
+
+  h_title:'Health Check', h_sub:'Pre-launch self-test · 30 checks · Error must be zero to save',
+  h_err:'Error', h_warn:'Warn', h_info:'Info', h_ok:'Passed',
+  h_block:'Error blocks saving', h_pass:'Passed {x}/{n}',
+  g_route:'Routing', g_print:'Printing', g_lang:'Language', g_db:'Database',
+  h_fix:'Fix', h_cfg:'Open', h_toast:'Jumping to "{p}" settings, anchored at "{a}"',
+  p_route:'Station Routing', p_print:'Printer Setup', p_lang:'Language & Translation', p_db:'Database',
+  h_exportCsv:'Export CSV', h_exportPdf:'Export PDF', h_sign:'Signed copy kept on file in store',
+  h_mx:'B-19 Routing Matrix', h_mxBtn:'Routing matrix', h_mxNote:'Shares the same parser as the self-test',
+  h_mxSub:'Rows = document / event type · Columns = target station / terminal',
+  mx1:'New order', mx2:'Add dish', mx3:'Return dish', mx4:'Mark done', mx5:'Rush', mx6:'Call number',
+  mx7:'Change table', mx8:'Merge table', mx9:'Sold out', mx10:'Checkout',
+  mc1:'Hot kitchen', mc2:'Cold kitchen', mc3:'Grill', mc4:'Pastry', mc5:'Drinks', mc6:'Front desk',
+  lg1:'● Configured', lg2:'◐ Partially configured', lg3:'○ Not configured', lg4:'●! Misconfigured',
+
+  w_title:'Setup Wizard', w_sub:'Five steps to launch the store · exit anytime and resume later',
+  w_skip:'Skip for now', w_prev:'Back', w_next:'Next', w_finish:'Finish setup',
+  w_s1:'Language & Region', w_s2:'Store Profile', w_s3:'Database', w_s4:'Business Day & Segments', w_s5:'Create Admin',
+  w_lang:'Interface language', w_langHint:'Applies to all terminals, print templates and exports',
+  w_tz:'Time zone', w_tzHint:'Taken from this machine and read-only: a wrong zone shifts every duration metric',
+  w_shopName:'Store name', w_code:'Store code', w_codeWarn:'Cannot be changed after creation',
+  w_codeConfirm:'The store code is permanent once created — cross-check it against HQ before continuing',
+  w_biz:'Business type', w_bizHint:'Only presets defaults; it does not change any functionality',
+  bz1:'Dine-in', bz2:'Fast food', bz3:'Hot pot', bz4:'Beverage',
+  w_addr:'Address', w_tel:'Phone',
+  w_engine:'Database engine', w_host:'Server address', w_port:'Port', w_dbname:'Database', w_user:'User', w_pwd:'Password',
+  w_sqlite:'SQLite', w_sqliteNote:'Standalone, zero setup', w_sqlsrv:'SQL Server', w_sqlsrvNote:'Chain, needs a server',
+  w_test:'Test connection', w_testOk:'Connected: 12 ms latency, version matches', w_testFail:'Failed: host unresolved, check address and port',
+  w_dayStart:'Business day starts at', w_dayHint:'Orders before this time belong to the previous business day',
+  w_seg:'Service segments', w_segHint:'Disabled segments are excluded from prep-time statistics',
+  wg1:'Breakfast', wg2:'Lunch', wg3:'Afternoon tea', wg4:'Dinner', wg5:'Late night',
+  w_adminTitle:'Create administrator', w_name:'Full name', w_empno:'Staff ID', w_mobile:'Mobile', w_pwd:'Password', w_pwd2:'Confirm password',
+  w_prog1:'Create database', w_prog2:'Run migrations', w_prog3:'Seed data', w_retry:'Retry', w_progFail:'Failed',
+  w_resume:'Unfinished run: database created — resume from the database step',
+  w_resumeHint:'Exit or failure is safe: the wizard remembers finished steps and resumes at the breakpoint',
+  w_done:'Setup complete — opening the admin dashboard',
+
+  n_gongbao:'Kung Pao Chicken', n_shuizhu:'Boiled Fish in Chili Oil', n_coke:'Cola', n_mabo:'Mapo Tofu',
+  n_huacai:'Dry-Pot Cauliflower', n_orange:'Fresh Orange Juice', n_beef:'Tomato Beef Brisket',
+  n_shrimp:'Steamed Shrimp with Garlic', n_rice:'Steamed Rice', n_cucumber:'Smashed Cucumber',
+  n_letea:'Iced Lemon Tea', n_beer:'Draft Beer', n_yogurt:'House Yogurt', n_fish:'Steamed Sea Bass',
+  n_noodle:'Dan Dan Noodles', n_soup:'Soup of the Day',
+  cat_hot:'Hot dishes', cat_cold:'Cold dishes', cat_staple:'Staples', cat_drink:'Drinks',
+  st1:'Hot kitchen', st2:'Cold kitchen', st3:'Grill', st4:'Pastry', st5:'Drinks', st6:'Pass',
+
+  hi:{
+    route:[
+      ['New order → Hot kitchen','Bound to hot kitchen, 8-minute overdue threshold'],
+      ['Add dish → Hot kitchen','Inherits the parent order station, no extra rule needed'],
+      ['Return dish → Pass','Not routed to the pass; front desk never gets the return receipt'],
+      ['Mark done → Pass','Bound to 2 terminals, 1 of them offline'],
+      ['Rush → All stations','Broadcast event; every station is alerted'],
+      ['Call number → Front desk','Bound to the front-desk pickup screen'],
+      ['Change table → Order terminals','Only 2 of 3 order terminals receive the event'],
+      ['Merge table → Order terminals','Bound to every order terminal'],
+      ['Sold out → All stations','Broadcast event; cannot be disabled per station'],
+      ['Checkout → POS','Bound to the point-of-sale terminal']
+    ],
+    print:[
+      ['Hot kitchen printer','HP-Laser-01 online, 80 mm paper'],
+      ['Cold kitchen printer','No printer detected; cold orders print at the hot kitchen'],
+      ['Drinks printer','12 jobs queued, nothing printed in the last hour'],
+      ['Front desk receipt printer','Online, set as default receipt printer'],
+      ['Kitchen summary print','Online, summary template v3'],
+      ['Print template binding','All 6 stations have a print template bound'],
+      ['Print queue archive','Historical backlog archived, 30-day retention']
+    ],
+    lang:[
+      ['简体中文','1,240 / 1,240 strings, nothing missing'],
+      ['繁體中文（香港）','1,240 / 1,240 strings, nothing missing'],
+      ['English','6 strings missing, mostly export headers'],
+      ['Deutsch','18 strings missing, mostly in reports'],
+      ['Русский','24 strings missing, mostly in the wizard'],
+      ['العربية','Complete; RTL mirroring verified'],
+      ['RTL layout mirroring','Sidebar and tables mirrored; chart value axes keep their orientation'],
+      ['Font fallback chain','Simplified / Traditional / Arabic font stacks all resolve'],
+      ['Number & date formats','Some terminals still use yyyy/MM/dd, which the store does not']
+    ],
+    db:[
+      ['Database connection','Local SQLite, 3 ms latency'],
+      ['Schema version','Found v12, expected v14 — migration required'],
+      ['Archive job','Last archive 3 days ago; run it daily'],
+      ['Backup policy','Daily full backup at 03:00, 14-day retention']
+    ]
+  }
+},
+
+/* ---------------------------------------------------------------- de ------
+   德語膨脹 2.2×：複合詞（Durchschnittliche Ausgabedauer）會把標籤撐到兩行，
+   所有標籤一律 line-clamp:2 + min-width:0，不允許靠縮字號硬塞。 */
+de:{
+  c_product:'KDS Verwaltung', c_shop:'Beispielfiliale · Zhongshan-Str.',
+  c_navOps:'Betrieb', c_navCfg:'Konfiguration',
+  c_navDash:'Übersicht', c_navReport:'Tagesbericht', c_navHealth:'Systemprüfung', c_navWizard:'Ersteinrichtung',
+  c_navMenu:'Speisekarte', c_navPrinter:'Drucker', c_soon:'Geplant',
+  c_input:'Eingabe', c_inMouse:'Maus', c_inTouch:'Touch', c_theme:'Design', c_themeA:'A Nacht', c_themeB:'B Taglicht', c_lang:'Sprache',
+  c_updated:'Daten aktualisiert um {t}', c_ttl:'TTL 5 Min.', c_refresh:'Aktualisieren',
+  c_go:'Bearbeiten', c_cfg:'Öffnen', c_export:'Exportieren', c_fold:'Einklappen', c_unfold:'Ausklappen',
+  c_rank:'Nr.', c_item:'Artikel', c_cat:'Kategorie', c_qty:'Verkauft', c_amt:'Betrag', c_total:'Summe',
+
+  d_title:'Übersichts-Dashboard', d_sub:'Echtzeitübersicht der Filiale für Schichtbesprechung und Disposition',
+  d_k1:'In Arbeit', d_k2:'Durchschn. Ausgabedauer', d_k3:'Überzogen', d_k4:'Storniert', d_k5:'Verderb',
+  u_order:'Aufträge', u_min:'Min.', u_portion:'Portionen', d_vs:'gegenüber Vorperiode',
+  d_r1:'Heute', d_r5:'Letzte 5 Tage', d_r7:'Letzte 7 Tage', d_r30:'Letzte 30 Tage',
+  d_trend:'Trend der durchschnittlichen Ausgabedauer', d_trendNote:'Letzte 14 Tage · Minuten · gestrichelt = Ziel 10 Min.',
+  d_load:'Auslastung der Stationen', d_loadNote:'In Arbeit / Kapazität; ab 80 % Bernsteinfarbe',
+  d_alert:'Ausnahmehinweise', d_alertNote:'Dauerhaft sichtbar. Zeigt 0 bei Leerstand — niemals eingeklappt',
+  a1:'Offen über Tageswechsel', a2:'Ausverkauft, Bestätigung offen', a3:'Druckstau', a4:'Archivierung fehlgeschlagen',
+  d_rankAll:'Verkaufsrangliste · Alle Kategorien TOP10', d_rankNote:'Getränke enthalten; mit Punkt gekennzeichnet',
+  d_rankDrinks:'Getränke TOP', d_rankDrinkNote:'Eigene Liste, damit Getränke die Signature-Gerichte nicht verdrängen',
+  d_split:'Eigene Getränkeliste anzeigen',
+  d_splitHint:'Ohne Trennung verdrängt Cola die Signature-Gerichte — das führt zu Fehlurteilen',
+  d_chartLine:'Liniendiagramm: durchschnittliche Ausgabedauer der letzten 14 Tage',
+  d_chartBar:'Balkendiagramm: aktuelle Auslastung von 6 Küchenstationen',
+  d_axisDay:'T', d_target:'Ziel 10 Min.',
+
+  r_title:'Tagesbericht', r_sub:'Umsatzdetails eines Tages und Verlustursachen',
+  r_loss:'Verlustübersicht', r_lossRet:'Storniert', r_lossWaste:'Verderb', r_lossTotal:'Summe',
+  r_lossFormula:'Summe = Storniert + Verderb',
+  r_date:'Datum', r_export:'CSV exportieren',
+  r_colItem:'Artikel', r_colCat:'Kategorie', r_colQty:'Verkauft', r_colRet:'Storniert', r_colWaste:'Verderb', r_colAmt:'Betrag',
+  r_cur:'€',
+
+  h_title:'Systemprüfung', h_sub:'Selbsttest vor Inbetriebnahme · 30 Prüfungen · Error muss 0 sein zum Speichern',
+  h_err:'Error', h_warn:'Warn', h_info:'Info', h_ok:'Bestanden',
+  h_block:'Error blockiert das Speichern', h_pass:'Bestanden {x}/{n}',
+  g_route:'Routing', g_print:'Druck', g_lang:'Sprache', g_db:'Datenbank',
+  h_fix:'Beheben', h_cfg:'Öffnen', h_toast:'Wechsel zur Einrichtungsseite „{p}“, Abschnitt „{a}“',
+  p_route:'Stationsrouting', p_print:'Druckerkonfiguration', p_lang:'Sprache & Übersetzung', p_db:'Datenbank',
+  h_exportCsv:'CSV exportieren', h_exportPdf:'PDF exportieren', h_sign:'Unzeichnete Kopie bleibt in der Filiale',
+  h_mx:'B-19 Routing-Matrix', h_mxBtn:'Routing-Matrix', h_mxNote:'Nutzt denselben Parser wie der Selbsttest',
+  h_mxSub:'Zeilen = Beleg- / Ereignistyp · Spalten = Zielstation / Terminal',
+  mx1:'Bestellung', mx2:'Nachbestellung', mx3:'Stornierung', mx4:'Fertig gemeldet', mx5:'Eilen', mx6:'Nummer aufrufen',
+  mx7:'Tischwechsel', mx8:'Tische zusammenführen', mx9:'Ausverkauft', mx10:'Kassenabschluss',
+  mc1:'Warme Küche', mc2:'Kalte Küche', mc3:'Grill', mc4:'Backwaren', mc5:'Getränke', mc6:'Kasse',
+  lg1:'● Konfiguriert', lg2:'◐ Teilweise konfiguriert', lg3:'○ Nicht konfiguriert', lg4:'●! Fehlkonfiguriert',
+
+  w_title:'Ersteinrichtung', w_sub:'Fünf Schritte bis zum Start · jederzeit abbrechbar und fortsetzbar',
+  w_skip:'Später ergänzen', w_prev:'Zurück', w_next:'Weiter', w_finish:'Installation abschließen',
+  w_s1:'Sprache & Region', w_s2:'Filialdaten', w_s3:'Datenbank', w_s4:'Geschäftstag & Services', w_s5:'Administrator anlegen',
+  w_lang:'Oberflächensprache', w_langHint:'Gilt für alle Terminals, Druckvorlagen und Exporte',
+  w_tz:'Zeitzone', w_tzHint:'Vom Rechner übernommen und schreibgeschützt: falsch eingestellt verschiebt jede Dauerkennzahl',
+  w_shopName:'Filialname', w_code:'Filialcode', w_codeWarn:'Nach dem Anlegen nicht mehr änderbar',
+  w_codeConfirm:'Der Filialcode ist nach dem Anlegen endgültig — vor dem Weiter mit der Zentrale abgleichen',
+  w_biz:'Betriebsart', w_bizHint:'Setzt nur Standardwerte; keine Funktion wird dadurch verändert',
+  bz1:'Restaurant', bz2:'Schnellrestaurant', bz3:'Feuertopf', bz4:'Getränke',
+  w_addr:'Adresse', w_tel:'Telefon',
+  w_engine:'Datenbankmodul', w_host:'Serveradresse', w_port:'Port', w_dbname:'Datenbankname', w_user:'Benutzer', w_pwd:'Kennwort',
+  w_sqlite:'SQLite', w_sqliteNote:'Einzelplatz, keine Einrichtung', w_sqlsrv:'SQL Server', w_sqlsrvNote:'Kette, benötigt Server',
+  w_test:'Verbindung testen', w_testOk:'Verbunden: 12 ms Latenz, Version passt', w_testFail:'Fehlgeschlagen: Host nicht auflösbar, Adresse und Port prüfen',
+  w_dayStart:'Geschäftstag beginnt um', w_dayHint:'Bestellungen davor gehören zum vorherigen Geschäftstag',
+  w_seg:'Services', w_segHint:'Deaktivierte Services zählen nicht in der Ausgabedauer-Statistik',
+  wg1:'Frühstück', wg2:'Mittagessen', wg3:'Nachmittagstee', wg4:'Abendessen', wg5:'Späte Nacht',
+  w_adminTitle:'Administrator anlegen', w_name:'Name', w_empno:'Personalnummer', w_mobile:'Mobilnummer', w_pwd:'Kennwort', w_pwd2:'Kennwort bestätigen',
+  w_prog1:'Datenbank anlegen', w_prog2:'Migrationen anwenden', w_prog3:'Stammdaten laden', w_retry:'Erneut versuchen', w_progFail:'Fehlgeschlagen',
+  w_resume:'Letzter Lauf unvollständig: Datenbank angelegt — fortsetzen ab Schritt Datenbank',
+  w_resumeHint:'Abbruch oder Fehler ist unkritisch: der Assistent merkt fertige Schritte und setzt am Bruchpunkt fort',
+  w_done:'Installation abgeschlossen — die Übersicht wird geöffnet',
+
+  n_gongbao:'Kung-Pao-Huhn', n_shuizhu:'Fisch in Chiliöl', n_coke:'Cola', n_mabo:'Mapo Tofu',
+  n_huacai:'Blumenkohl im Trockentopf', n_orange:'Frischer Orangensaft', n_beef:'Rinderbrust mit Tomaten',
+  n_shrimp:'Garnelen mit Knoblauch', n_rice:'Gedämpfter Reis', n_cucumber:'Geschlagene Gurke',
+  n_letea:'Eistee mit Zitrone', n_beer:'Frisch gezapftes Bier', n_yogurt:'Hausgemachter Joghurt',
+  n_fish:'Gedämpfter Seebarsch', n_noodle:'Dan-Dan-Nudeln', n_soup:'Tagessuppe',
+  cat_hot:'Warme Gerichte', cat_cold:'Kalte Gerichte', cat_staple:'Beilagen', cat_drink:'Getränke',
+  st1:'Warme Küche', st2:'Kalte Küche', st3:'Grill', st4:'Backwaren', st5:'Getränke', st6:'Ausgabe',
+
+  hi:{
+    route:[
+      ['Bestellung → Warme Küche','An warme Küche gebunden, Schwelle 8 Minuten'],
+      ['Nachbestellung → Warme Küche','Erbt die Station des Ursprungsbelegs, keine eigene Regel nötig'],
+      ['Stornierung → Ausgabe','Nicht zur Ausgabe geroutet; Kasse erhält keine Storno-Quittung'],
+      ['Fertig gemeldet → Ausgabe','An 2 Terminals gebunden, davon 1 offline'],
+      ['Eilen → Alle Stationen','Rundruf; alle Stationen werden benachrichtigt'],
+      ['Nummer aufrufen → Kasse','An das Abhol-Display an der Kasse gebunden'],
+      ['Tischwechsel → Bestellterminals','Nur 2 von 3 Bestellterminals erhalten das Ereignis'],
+      ['Tische zusammenführen → Bestellterminals','An jedes Bestellterminal gebunden'],
+      ['Ausverkauft → Alle Stationen','Rundruf; kann je Station nicht abgeschaltet werden'],
+      ['Kassenabschluss → Kasse','An das Kassenterminal gebunden']
+    ],
+    print:[
+      ['Drucker warme Küche','HP-Laser-01 online, Papier 80 mm'],
+      ['Drucker kalte Küche','Kein Drucker gefunden; kalte Belege laufen über die warme Küche'],
+      ['Getränkedrucker','12 Aufträge in der Warteschlange, seit einer Stunde kein Ausdruck'],
+      ['Bondrucker Kasse','Online, als Standard-Bondrucker gesetzt'],
+      ['Sammelbon Küche','Online, Sammelvorlage v3'],
+      ['Druckvorlagen-Zuordnung','Alle 6 Stationen haben eine Druckvorlage'],
+      ['Archiv der Druckwarteschlange','Historischer Rückstau archiviert, 30 Tage Aufbewahrung']
+    ],
+    lang:[
+      ['简体中文','1.240 / 1.240 Texte, nichts fehlt'],
+      ['繁體中文（香港）','1.240 / 1.240 Texte, nichts fehlt'],
+      ['English','6 Texte fehlen, vor allem Export-Kopfzeilen'],
+      ['Deutsch','18 Texte fehlen, vor allem im Berichtswesen'],
+      ['Русский','24 Texte fehlen, vor allem im Assistenten'],
+      ['العربية','Vollständig; RTL-Spiegelung geprüft'],
+      ['RTL-Spiegelung des Layouts','Seitenleiste und Tabellen gespiegelt; Werteachsen der Diagramme bleiben'],
+      ['Schrift-Fallback-Kette','Vereinfacht / Traditionell / Arabisch — alle Schriftstapel treffen'],
+      ['Zahlen- & Datumsformate','Einige Terminals nutzen noch yyyy/MM/dd, die Filiale nicht']
+    ],
+    db:[
+      ['Datenbankverbindung','Lokales SQLite, 3 ms Latenz'],
+      ['Schemaversion','Gefunden v12, erwartet v14 — Migration nötig'],
+      ['Archivierungsauftrag','Letzte Archivierung vor 3 Tagen; täglich ausführen'],
+      ['Sicherungsstrategie','Täglich 03:00 Vollsicherung, 14 Tage Aufbewahrung']
+    ]
+  }
+},
+
+/* ---------------------------------------------------------------- ru ------
+   俄语膨胀 2.3×（本项目最长），所有数值列给固定最小宽度 + 文本列 min-width:0。 */
+ru:{
+  c_product:'KDS · Панель управления', c_shop:'Демо-магазин · ул. Чжуншань',
+  c_navOps:'Работа', c_navCfg:'Настройки',
+  c_navDash:'Обзор', c_navReport:'Дневной отчёт', c_navHealth:'Проверка системы', c_navWizard:'Мастер настройки',
+  c_navMenu:'Меню', c_navPrinter:'Принтеры', c_soon:'В планах',
+  c_input:'Ввод', c_inMouse:'Мышь', c_inTouch:'Касание', c_theme:'Тема', c_themeA:'A Ночь', c_themeB:'B День', c_lang:'Язык',
+  c_updated:'Данные обновлены в {t}', c_ttl:'TTL 5 мин', c_refresh:'Обновить',
+  c_go:'Исправить', c_cfg:'Открыть', c_export:'Экспорт', c_fold:'Свернуть', c_unfold:'Развернуть',
+  c_rank:'№', c_item:'Позиция', c_cat:'Категория', c_qty:'Продано', c_amt:'Сумма', c_total:'Итого',
+
+  d_title:'Обзорная панель', d_sub:'Обзор работы магазина в реальном времени для разбора смены и диспетчеризации',
+  d_k1:'В работе', d_k2:'Среднее время выдачи', d_k3:'Просрочено', d_k4:'Возвраты', d_k5:'Списания',
+  u_order:'зак.', u_min:'мин', u_portion:'порц.', d_vs:'к прошлому периоду',
+  d_r1:'Сегодня', d_r5:'Последние 5 дней', d_r7:'Последние 7 дней', d_r30:'Последние 30 дней',
+  d_trend:'Тренд среднего времени выдачи', d_trendNote:'Последние 14 дней · минуты · пунктир = цель 10 мин',
+  d_load:'Загрузка станций', d_loadNote:'В работе / мощность станции; выше 80 % — жёлтый',
+  d_alert:'Уведомления об отклонениях', d_alertNote:'Всегда на экране. При отсутствии — 0, никогда не сворачивается',
+  a1:'Не закрыто при смене дня', a2:'Нет в наличии, ждёт подтверждения', a3:'Очередь печати', a4:'Ошибка архивации',
+  d_rankAll:'Рейтинг продаж · все категории ТОП-10', d_rankNote:'Напитки включены и отмечены точкой',
+  d_rankDrinks:'Напитки ТОП', d_rankDrinkNote:'Отдельный рейтинг, чтобы напитки не вытесняли фирменные блюда',
+  d_split:'Показывать отдельный рейтинг напитков',
+  d_splitHint:'Без разделения кола вытесняет фирменные блюда — это ведёт к ошибочным выводам',
+  d_chartLine:'Линейный график: среднее время выдачи за последние 14 дней',
+  d_chartBar:'Горизонтальные полосы: текущая загрузка 6 станций кухни',
+  d_axisDay:'д', d_target:'Цель 10 мин',
+
+  r_title:'Дневной отчёт', r_sub:'Детализация продаж за день и причины потерь',
+  r_loss:'Обзор потерь', r_lossRet:'Возвраты', r_lossWaste:'Списания', r_lossTotal:'Итого',
+  r_lossFormula:'Итого = Возвраты + Списания',
+  r_date:'Дата', r_export:'Экспорт CSV',
+  r_colItem:'Позиция', r_colCat:'Категория', r_colQty:'Продано', r_colRet:'Возвраты', r_colWaste:'Списания', r_colAmt:'Сумма',
+  r_cur:'₽',
+
+  h_title:'Проверка системы', h_sub:'Самопроверка перед запуском · 30 проверок · Error должен быть 0 для сохранения',
+  h_err:'Error', h_warn:'Warn', h_info:'Info', h_ok:'Пройдено',
+  h_block:'Error блокирует сохранение', h_pass:'Пройдено {x}/{n}',
+  g_route:'Маршрутизация', g_print:'Печать', g_lang:'Язык', g_db:'База данных',
+  h_fix:'Исправить', h_cfg:'Открыть', h_toast:'Переход на страницу настроек «{p}», раздел «{a}»',
+  p_route:'Маршрутизация по станциям', p_print:'Настройка принтеров', p_lang:'Язык и перевод', p_db:'База данных',
+  h_exportCsv:'Экспорт CSV', h_exportPdf:'Экспорт PDF', h_sign:'Подписанная копия хранится в магазине',
+  h_mx:'B-19 Матрица маршрутизации', h_mxBtn:'Матрица маршрутизации', h_mxNote:'Использует тот же анализатор, что и самопроверка',
+  h_mxSub:'Строки = документ / тип события · Столбцы = станция / терминал назначения',
+  mx1:'Новый заказ', mx2:'Дозаказ', mx3:'Возврат блюда', mx4:'Отметка готовности', mx5:'Срочно', mx6:'Вызов номера',
+  mx7:'Смена стола', mx8:'Объединение столов', mx9:'Нет в наличии', mx10:'Оплата',
+  mc1:'Горячий цех', mc2:'Холодный цех', mc3:'Гриль', mc4:'Выпечка', mc5:'Напитки', mc6:'Касса',
+  lg1:'● Настроено', lg2:'◐ Настроено частично', lg3:'○ Не настроено', lg4:'●! Ошибка настройки',
+
+  w_title:'Мастер настройки', w_sub:'Пять шагов до запуска · можно выйти и продолжить позже',
+  w_skip:'Пропустить и заполнить позже', w_prev:'Назад', w_next:'Далее', w_finish:'Завершить установку',
+  w_s1:'Язык и регион', w_s2:'Данные магазина', w_s3:'База данных', w_s4:'Рабочий день и смены питания', w_s5:'Создать администратора',
+  w_lang:'Язык интерфейса', w_langHint:'Влияет на все терминалы, шаблоны печати и экспорт',
+  w_tz:'Часовой пояс', w_tzHint:'Берётся с компьютера, только для чтения: ошибка сдвинет всю статистику длительности',
+  w_shopName:'Название магазина', w_code:'Код магазина', w_codeWarn:'После создания не изменяется',
+  w_codeConfirm:'Код магазина окончательный после создания — сверьтесь с центром перед продолжением',
+  w_biz:'Формат заведения', w_bizHint:'Только задаёт значения по умолчанию, функциональность не меняет',
+  bz1:'Ресторан', bz2:'Фастфуд', bz3:'Хого', bz4:'Напитки',
+  w_addr:'Адрес', w_tel:'Телефон',
+  w_engine:'Система базы данных', w_host:'Адрес сервера', w_port:'Порт', w_dbname:'Имя базы', w_user:'Пользователь', w_pwd:'Пароль',
+  w_sqlite:'SQLite', w_sqliteNote:'Один компьютер, без настройки', w_sqlsrv:'SQL Server', w_sqlsrvNote:'Сеть, нужен сервер',
+  w_test:'Проверить подключение', w_testOk:'Подключено: задержка 12 мс, версия совпадает', w_testFail:'Ошибка: узел не разрешён, проверьте адрес и порт',
+  w_dayStart:'Рабочий день начинается в', w_dayHint:'Заказы раньше этого времени относятся к прошлому рабочему дню',
+  w_seg:'Смены питания', w_segHint:'Отключённые смены не учитываются в статистике времени выдачи',
+  wg1:'Завтрак', wg2:'Обед', wg3:'Полдник', wg4:'Ужин', wg5:'Поздняя ночь',
+  w_adminTitle:'Создать администратора', w_name:'ФИО', w_empno:'Табельный номер', w_mobile:'Мобильный', w_pwd:'Пароль', w_pwd2:'Подтверждение пароля',
+  w_prog1:'Создание базы', w_prog2:'Применение миграций', w_prog3:'Начальные данные', w_retry:'Повторить', w_progFail:'Ошибка',
+  w_resume:'Прошлый запуск не завершён: база создана — продолжить с шага «База данных»',
+  w_resumeHint:'Выход или сбой не страшны: мастер помнит выполненные шаги и продолжает с точки остановки',
+  w_done:'Установка завершена — открывается обзорная панель',
+
+  n_gongbao:'Курица гунбао', n_shuizhu:'Рыба в масле с перцем', n_coke:'Кола', n_mabo:'Тофу мапо',
+  n_huacai:'Цветная капуста в горшочке', n_orange:'Свежий апельсиновый сок', n_beef:'Говяжья грудинка с томатами',
+  n_shrimp:'Креветки с чесноком', n_rice:'Рис на пару', n_cucumber:'Битый огурец',
+  n_letea:'Холодный чай с лимоном', n_beer:'Свежее пиво', n_yogurt:'Домашний йогурт',
+  n_fish:'Морской окунь на пару', n_noodle:'Лапша даньдань', n_soup:'Суп дня',
+  cat_hot:'Горячие блюда', cat_cold:'Холодные блюда', cat_staple:'Гарниры', cat_drink:'Напитки',
+  st1:'Горячий цех', st2:'Холодный цех', st3:'Гриль', st4:'Выпечка', st5:'Напитки', st6:'Выдача',
+
+  hi:{
+    route:[
+      ['Новый заказ → Горячий цех','Привязано к горячему цеху, порог 8 минут'],
+      ['Дозаказ → Горячий цех','Наследует станцию исходного заказа, отдельное правило не нужно'],
+      ['Возврат блюда → Выдача','Не направлено на выдачу; касса не получает квитанцию возврата'],
+      ['Отметка готовности → Выдача','Привязано к 2 терминалам, один из них offline'],
+      ['Срочно → Все станции','Широковещательное событие; оповещаются все станции'],
+      ['Вызов номера → Касса','Привязано к экрану выдачи у кассы'],
+      ['Смена стола → Терминалы заказа','Только 2 из 3 терминалов получают событие'],
+      ['Объединение столов → Терминалы заказа','Привязано ко всем терминалам заказа'],
+      ['Нет в наличии → Все станции','Широковещательное событие; нельзя отключить по станциям'],
+      ['Оплата → Касса','Привязано к кассовому терминалу']
+    ],
+    print:[
+      ['Принтер горячего цеха','HP-Laser-01 online, бумага 80 мм'],
+      ['Принтер холодного цеха','Принтер не найден; холодные заказы печатаются в горячем цехе'],
+      ['Принтер напитков','В очереди 12 заданий, за последний час печати не было'],
+      ['Чековый принтер кассы','Online, назначен принтером по умолчанию'],
+      ['Сводный заказ кухни','Online, шаблон сводного заказа v3'],
+      ['Привязка шаблонов печати','Для всех 6 станций назначен шаблон печати'],
+      ['Архив очереди печати','Историческая очередь заархивирована, срок хранения 30 дней']
+    ],
+    lang:[
+      ['简体中文','1 240 / 1 240 строк, без пропусков'],
+      ['繁體中文（香港）','1 240 / 1 240 строк, без пропусков'],
+      ['English','Не хватает 6 строк, в основном заголовки экспорта'],
+      ['Deutsch','Не хватает 18 строк, в основном отчёты'],
+      ['Русский','Не хватает 24 строк, в основном мастер настройки'],
+      ['العربية','Полностью; зеркалирование RTL проверено'],
+      ['Зеркалирование RTL','Боковая панель и таблицы зеркалятся; оси значений графиков сохраняют направление'],
+      ['Цепочка запасных шрифтов','Упрощённый / традиционный / арабский — все стеки найдены'],
+      ['Форматы чисел и дат','Некоторые терминалы всё ещё используют yyyy/MM/dd, а магазин — нет']
+    ],
+    db:[
+      ['Подключение к базе','Локальная SQLite, задержка 3 мс'],
+      ['Версия схемы','Найдено v12, ожидается v14 — нужна миграция'],
+      ['Задание архивации','Последняя архивация 3 дня назад; запускать ежедневно'],
+      ['Политика резервного копирования','Ежедневно 03:00 полная копия, хранение 14 дней']
+    ]
+  }
+},
+
+/* ---------------------------------------------------------------- ar ------
+   RTL：dir=rtl 由 LANG_META 驅動，版面全部用邏輯屬性鏡像；
+   數字仍寫阿拉伯數字（餐飲業慣例），只鏡像方向與對齊。 */
+ar:{
+  c_product:'لوحة إدارة KDS', c_shop:'فرع تجريبي · شارع تشونغشان',
+  c_navOps:'التشغيل', c_navCfg:'الإعدادات',
+  c_navDash:'لوحة المؤشرات', c_navReport:'التقرير اليومي', c_navHealth:'فحص النظام', c_navWizard:'معالج الإعداد',
+  c_navMenu:'قائمة الطعام', c_navPrinter:'الطابعات', c_soon:'قريبًا',
+  c_input:'الإدخال', c_inMouse:'فأرة', c_inTouch:'لمس', c_theme:'المظهر', c_themeA:'أ · ليلي', c_themeB:'ب · نهاري', c_lang:'اللغة',
+  c_updated:'آخر تحديث للبيانات {t}', c_ttl:'صلاحية ٥ دقائق', c_refresh:'تحديث',
+  c_go:'معالجة', c_cfg:'فتح', c_export:'تصدير', c_fold:'إخفاء', c_unfold:'إظهار',
+  c_rank:'#', c_item:'الصنف', c_cat:'الفئة', c_qty:'الكمية المباعة', c_amt:'المبلغ', c_total:'الإجمالي',
+
+  d_title:'لوحة المؤشرات', d_sub:'نظرة عامة على تشغيل الفرع لمراجعة الورديات والإدارة الميدانية',
+  d_k1:'قيد التحضير', d_k2:'متوسط زمن الإخراج', d_k3:'متأخرة', d_k4:'مرتجعة', d_k5:'تالف',
+  u_order:'طلب', u_min:'دقيقة', u_portion:'حصة', d_vs:'مقارنة بالفترة السابقة',
+  d_r1:'اليوم', d_r5:'آخر ٥ أيام', d_r7:'آخر ٧ أيام', d_r30:'آخر ٣٠ يومًا',
+  d_trend:'اتجاه متوسط زمن الإخراج', d_trendNote:'آخر ١٤ يومًا · بالدقائق · الخط المتقطع = هدف ١٠ دقائق',
+  d_load:'حِمل محطات التحضير', d_loadNote:'قيد العمل ÷ طاقة المحطة؛ يتحول للأصفر فوق ٨٠٪',
+  d_alert:'تنبيهات الاستثناءات', d_alertNote:'معروض دائمًا. يظهر ٠ عند عدم وجود ملاحظات — ولا يُطوى أبدًا',
+  a1:'غير مكتمل عبر تغيّر اليوم', a2:'نفاد بانتظار التأكيد', a3:'تراكم في الطباعة', a4:'فشل الأرشفة',
+  d_rankAll:'ترتيب المبيعات · كل الفئات أعلى ١٠', d_rankNote:'المشروبات مدرجة ومعلّمة بنقطة',
+  d_rankDrinks:'أعلى المشروبات', d_rankDrinkNote:'قائمة فرعية مستقلة حتى لا تزاحم الأطباق الرئيسية',
+  d_split:'إظهار قائمة مشروبات فرعية',
+  d_splitHint:'بدون فصل، تتقدم الكولا على الأطباق الرئيسية ويخطئ القارئ في التقدير',
+  d_chartLine:'رسم خطي: متوسط زمن الإخراج خلال آخر ١٤ يومًا',
+  d_chartBar:'أعمدة أفقية: الحِمل الحالي لست محطات تحضير',
+  d_axisDay:'ي', d_target:'الهدف ١٠ دقائق',
+
+  r_title:'التقرير اليومي', r_sub:'تفصيل مبيعات يوم واحد وأسباب الفاقد',
+  r_loss:'نظرة عامة على الفاقد', r_lossRet:'مرتجع', r_lossWaste:'تالف', r_lossTotal:'الإجمالي',
+  r_lossFormula:'الإجمالي = المرتجع + التالف',
+  r_date:'التاريخ', r_export:'تصدير CSV',
+  r_colItem:'الصنف', r_colCat:'الفئة', r_colQty:'الكمية المباعة', r_colRet:'مرتجع', r_colWaste:'تالف', r_colAmt:'المبلغ',
+  r_cur:'﷼',
+
+  h_title:'فحص النظام', h_sub:'فحص ذاتي قبل التشغيل · ٣٠ بندًا · يجب أن يكون الخطأ صفرًا للحفظ',
+  h_err:'خطأ', h_warn:'تحذير', h_info:'معلومة', h_ok:'ناجح',
+  h_block:'الخطأ يمنع الحفظ', h_pass:'ناجح {x}/{n}',
+  g_route:'التوجيه', g_print:'الطباعة', g_lang:'اللغة', g_db:'قاعدة البيانات',
+  h_fix:'إصلاح', h_cfg:'فتح', h_toast:'الانتقال إلى صفحة إعدادات «{p}» والقسم «{a}»',
+  p_route:'توجيه المحطات', p_print:'إعداد الطابعات', p_lang:'اللغة والترجمة', p_db:'قاعدة البيانات',
+  h_exportCsv:'تصدير CSV', h_exportPdf:'تصدير PDF', h_sign:'تُحفظ نسخة موقّعة في الفرع',
+  h_mx:'B-19 مصفوفة التوجيه', h_mxBtn:'مصفوفة التوجيه', h_mxNote:'تستخدم نفس محلل الفحص الذاتي',
+  h_mxSub:'الصفوف = نوع المستند / الحدث · الأعمدة = المحطة أو الجهاز الهدف',
+  mx1:'طلب جديد', mx2:'إضافة صنف', mx3:'إرجاع صنف', mx4:'تم الإخراج', mx5:'استعجال', mx6:'نداء رقم',
+  mx7:'تغيير طاولة', mx8:'دمج طاولات', mx9:'نفاد', mx10:'الدفع',
+  mc1:'محطة الساخن', mc2:'محطة البارد', mc3:'الشواء', mc4:'المعجنات', mc5:'المشروبات', mc6:'الكاشير',
+  lg1:'● مُعدّ', lg2:'◐ مُعدّ جزئيًا', lg3:'○ غير مُعدّ', lg4:'●! إعداد خاطئ',
+
+  w_title:'معالج الإعداد', w_sub:'خمس خطوات لتشغيل الفرع · يمكن الخروج والعودة لاحقًا',
+  w_skip:'تخطي وإضافتها لاحقًا', w_prev:'السابق', w_next:'التالي', w_finish:'إنهاء التثبيت',
+  w_s1:'اللغة والمنطقة', w_s2:'بيانات الفرع', w_s3:'قاعدة البيانات', w_s4:'اليوم التشغيلي والفترات', w_s5:'إنشاء مدير',
+  w_lang:'لغة الواجهة', w_langHint:'تؤثر على كل الأجهزة وقوالب الطباعة وملفات التصدير',
+  w_tz:'المنطقة الزمنية', w_tzHint:'مأخوذة من الجهاز للقراءة فقط: أي خطأ يزيح كل إحصاءات المدد',
+  w_shopName:'اسم الفرع', w_code:'رمز الفرع', w_codeWarn:'لا يمكن تغييره بعد الإنشاء',
+  w_codeConfirm:'رمز الفرع نهائي بعد الإنشاء — راجعه مع الإدارة العامة قبل المتابعة',
+  w_biz:'نوع النشاط', w_bizHint:'يضبط القيم الافتراضية فقط ولا يغيّر أي وظيفة',
+  bz1:'مطعم', bz2:'وجبات سريعة', bz3:'هوت بوت', bz4:'مشروبات',
+  w_addr:'العنوان', w_tel:'الهاتف',
+  w_engine:'محرك قاعدة البيانات', w_host:'عنوان الخادم', w_port:'المنفذ', w_dbname:'اسم القاعدة', w_user:'المستخدم', w_pwd:'كلمة المرور',
+  w_sqlite:'SQLite', w_sqliteNote:'جهاز واحد، بلا إعداد', w_sqlsrv:'SQL Server', w_sqlsrvNote:'للسلاسل، يحتاج خادمًا',
+  w_test:'اختبار الاتصال', w_testOk:'الاتصال ناجح: زمن الاستجابة ١٢ مللي ثانية والإصدار مطابق', w_testFail:'فشل الاتصال: تعذّر حلّ الخادم، تحقّق من العنوان والمنفذ',
+  w_dayStart:'يبدأ اليوم التشغيلي في', w_dayHint:'الطلبات قبل هذا الوقت تُسجَّل في اليوم التشغيلي السابق',
+  w_seg:'فترات التقديم', w_segHint:'الفترات المعطّلة لا تدخل في إحصاء زمن الإخراج',
+  wg1:'الإفطار', wg2:'الغداء', wg3:'شاي بعد الظهر', wg4:'العشاء', wg5:'منتصف الليل',
+  w_adminTitle:'إنشاء مدير', w_name:'الاسم', w_empno:'الرقم الوظيفي', w_mobile:'الجوال', w_pwd:'كلمة المرور', w_pwd2:'تأكيد كلمة المرور',
+  w_prog1:'إنشاء القاعدة', w_prog2:'ترحيل البنية', w_prog3:'البيانات الأساسية', w_retry:'إعادة المحاولة', w_progFail:'فشل',
+  w_resume:'آخر تشغيل غير مكتمل: القاعدة أُنشئت — المتابعة من خطوة قاعدة البيانات',
+  w_resumeHint:'الخروج أو الفشل ليس مشكلة: يحفظ المعالج الخطوات المنجزة ويكمل من نقطة التوقف',
+  w_done:'اكتمل التثبيت — جارٍ فتح لوحة المؤشرات',
+
+  n_gongbao:'دجاج كونغ باو', n_shuizhu:'سمك بزيت الفلفل', n_coke:'كولا', n_mabo:'توفو مابو',
+  n_huacai:'قرنبيط بالقدر الجاف', n_orange:'عصير برتقال طازج', n_beef:'صدر بقري بالطماطم',
+  n_shrimp:'روبيان بالثوم على البخار', n_rice:'أرز أبيض', n_cucumber:'خيار مقطوق',
+  n_letea:'شاي مثلج بالليمون', n_beer:'بيرة طازجة', n_yogurt:'زبادي منزلي',
+  n_fish:'قاروص على البخار', n_noodle:'نودلز دان دان', n_soup:'شوربة اليوم',
+  cat_hot:'أطباق ساخنة', cat_cold:'أطباق باردة', cat_staple:'أطباق جانبية', cat_drink:'مشروبات',
+  st1:'محطة الساخن', st2:'محطة البارد', st3:'الشواء', st4:'المعجنات', st5:'المشروبات', st6:'منفذ الإخراج',
+
+  hi:{
+    route:[
+      ['طلب جديد ← محطة الساخن','مرتبط بالمحطة الساخنة، عتبة التأخير ٨ دقائق'],
+      ['إضافة صنف ← محطة الساخن','يرث محطة الطلب الأصلي ولا يحتاج قاعدة منفصلة'],
+      ['إرجاع صنف ← منفذ الإخراج','غير موجّه لمنفذ الإخراج؛ لا يصل إيصال الإرجاع للكاشير'],
+      ['تم الإخراج ← منفذ الإخراج','مرتبط بجهازين أحدهما غير متصل'],
+      ['استعجال ← كل المحطات','حدث بثّ عام؛ تُنبَّه جميع المحطات'],
+      ['نداء رقم ← الكاشير','مرتبط بشاشة الاستلام عند الكاشير'],
+      ['تغيير طاولة ← أجهزة الطلب','جهازان فقط من ثلاثة يستلمان الحدث'],
+      ['دمج طاولات ← أجهزة الطلب','مرتبط بكل أجهزة الطلب'],
+      ['نفاد ← كل المحطات','حدث بثّ عام ولا يمكن تعطيله لكل محطة'],
+      ['الدفع ← الكاشير','مرتبط بجهاز نقاط البيع']
+    ],
+    print:[
+      ['طابعة المحطة الساخنة','HP-Laser-01 متصلة، عرض الورق ٨٠ مم'],
+      ['طابعة المحطة الباردة','لم يتم العثور على طابعة؛ تُطبع طلبات البارد في المحطة الساخنة'],
+      ['طابعة المشروبات','١٢ مهمة في الانتظار ولم تتم طباعة شيء في الساعة الأخيرة'],
+      ['طابعة الإيصالات','متصلة ومعيّنة كطابعة افتراضية'],
+      ['طباعة الطلب الجامع','متصلة، قالب الطلب الجامع v3'],
+      ['ربط قوالب الطباعة','جميع المحطات الست مرتبطة بقالب طباعة'],
+      ['أرشفة قائمة الطباعة','تم أرشفة التراكم السابق والاحتفاظ به ٣٠ يومًا']
+    ],
+    lang:[
+      ['简体中文','١٢٤٠ / ١٢٤٠ نصًا، لا نقص'],
+      ['繁體中文（香港）','١٢٤٠ / ١٢٤٠ نصًا، لا نقص'],
+      ['English','ينقص ٦ نصوص، معظمها ترويسات التصدير'],
+      ['Deutsch','ينقص ١٨ نصًا، معظمها في التقارير'],
+      ['Русский','ينقص ٢٤ نصًا، معظمها في المعالج'],
+      ['العربية','مكتملة؛ تم التحقق من الانعكاس RTL'],
+      ['انعكاس التخطيط RTL','الشريط الجانبي والجداول معكوسة؛ محاور قيم الرسوم تحفظ اتجاهها'],
+      ['سلسلة الخطوط البديلة','المبسّطة / التقليدية / العربية — كلها متاحة'],
+      ['تنسيق الأرقام والتواريخ','بعض الأجهزة لا تزال تستخدم yyyy/MM/dd بخلاف عادة الفرع']
+    ],
+    db:[
+      ['اتصال قاعدة البيانات','SQLite محلية، زمن الاستجابة ٣ مللي ثانية'],
+      ['إصدار البنية','الموجود v12 والمطلوب v14 — يلزم الترحيل'],
+      ['مهمة الأرشفة','آخر أرشفة قبل ٣ أيام؛ يُنصح بتشغيلها يوميًا'],
+      ['سياسة النسخ الاحتياطي','نسخة كاملة يوميًا ٠٣:٠٠ والاحتفاظ ١٤ يومًا']
+    ]
+  }
+}
+
+};
+
+/* 取词：带 {n} 占位替换；未翻译的 key 回落中文，避免新语言缺词时页面露出 key 名 */
+function tr(k, vars){
+  let s = (T[S.lang] && T[S.lang][k] != null) ? T[S.lang][k]
+        : (T.zh[k] != null ? T.zh[k] : k);
+  if(vars) Object.keys(vars).forEach(v=>{ s = s.split('{'+v+'}').join(vars[v]); });
+  return s;
+}
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+/* ==========================================================================
+   4. 原型数据（骨架与语言无关；名称类文本一律走词典，切换语言时连数据一起变）
+   ========================================================================== */
+/* KPI：5 张卡。tone 决定左侧语义条颜色；bad 决定「上升」是红还是绿 ——
+   待制作/时长上升不算坏、超时/退单/报损上升才是坏，不能一律红。 */
+const KPI = [
+  {k:'d_k1', v:'128', u:'u_order',   d:'+12.4%', dir:'up',   bad:false, tone:''},
+  {k:'d_k2', v:'8.6', u:'u_min',     d:'−4.2%',  dir:'down', bad:false, tone:'t-info'},
+  {k:'d_k3', v:'17',  u:'u_order',   d:'+3',     dir:'up',   bad:true,  tone:'t-err'},
+  {k:'d_k4', v:'9',   u:'u_order',   d:'+1',     dir:'up',   bad:true,  tone:'t-warn'},
+  {k:'d_k5', v:'6',   u:'u_portion', d:'+2',     dir:'up',   bad:true,  tone:'t-rush'}
+];
+/* 近 14 日平均出品时长（分钟）—— 折线图数据 */
+const TREND = [9.4,8.9,9.7,10.6,9.8,8.8,8.3,9.0,8.7,8.2,7.8,8.4,8.7,8.5];
+/* 6 个档口负荷（%）；>80 转黄，用来暴露「热菜档是瓶颈」 */
+const LOAD  = [86,54,41,33,72,61];
+/* 异常提醒：四条常驻。count 为 0 也照常占位 */
+const ALERTS = [
+  {k:'a1', n:3,  sev:'err'},
+  {k:'a2', n:5,  sev:'warn'},
+  {k:'a3', n:12, sev:'warn'},
+  {k:'a4', n:1,  sev:'err'}
+];
+/* 主榜故意混入可乐与鲜榨橙汁：这是「要不要单独给酒水子榜」这个决策的证据 */
+const RANK = [
+  {k:'n_gongbao', c:'cat_hot',    q:186},
+  {k:'n_shuizhu', c:'cat_hot',    q:164},
+  {k:'n_coke',    c:'cat_drink',  q:152},
+  {k:'n_mabo',    c:'cat_hot',    q:141},
+  {k:'n_huacai',  c:'cat_hot',    q:128},
+  {k:'n_orange',  c:'cat_drink',  q:119},
+  {k:'n_beef',    c:'cat_hot',    q:112},
+  {k:'n_shrimp',  c:'cat_hot',    q:96},
+  {k:'n_rice',    c:'cat_staple', q:88},
+  {k:'n_cucumber',c:'cat_cold',   q:74}
+];
+const DRINKS = [
+  {k:'n_coke',   q:152},
+  {k:'n_orange', q:119},
+  {k:'n_letea',  q:63},
+  {k:'n_beer',   q:47},
+  {k:'n_yogurt', q:31}
+];
+/* 日报明细：销量 / 退菜 / 报损 / 金额 */
+const REPORT = [
+  {k:'n_gongbao', c:'cat_hot',    q:186, r:4, w:2,  a:5208},
+  {k:'n_shuizhu', c:'cat_hot',    q:164, r:3, w:1,  a:6396},
+  {k:'n_coke',    c:'cat_drink',  q:152, r:1, w:0,  a:1216},
+  {k:'n_mabo',    c:'cat_hot',    q:141, r:2, w:2,  a:3102},
+  {k:'n_huacai',  c:'cat_hot',    q:128, r:3, w:1,  a:3840},
+  {k:'n_orange',  c:'cat_drink',  q:119, r:2, w:3,  a:2142},
+  {k:'n_beef',    c:'cat_hot',    q:112, r:2, w:1,  a:5600},
+  {k:'n_shrimp',  c:'cat_hot',    q:96,  r:1, w:1,  a:4608},
+  {k:'n_fish',    c:'cat_hot',    q:78,  r:2, w:2,  a:5460},
+  {k:'n_rice',    c:'cat_staple', q:88,  r:0, w:0,  a:528},
+  {k:'n_noodle',  c:'cat_staple', q:64,  r:1, w:0,  a:1152},
+  {k:'n_cucumber',c:'cat_cold',   q:74,  r:2, w:0,  a:888}
+];
+/* 健康检查：四项分组共 30 项。st 与语言无关，六语言共用同一份结果。 */
+const HC = {
+  route:{g:'g_route', p:'p_route', st:['ok','ok','error','warn','ok','ok','warn','ok','info','ok']},
+  print:{g:'g_print', p:'p_print', st:['ok','error','warn','ok','ok','ok','info']},
+  lang :{g:'g_lang',  p:'p_lang',  st:['ok','ok','warn','warn','warn','ok','info','ok','ok']},
+  db   :{g:'g_db',    p:'p_db',    st:['ok','error','warn','ok']}
+};
+const HC_ORDER = ['route','print','lang','db'];
+/* B-19 路由矩阵：10 行（单据 / 事件类型）× 6 列（目标档口 / 终端）
+   四态：ok 已配置 / part 部分配置 / none 未配置 / bad 配置有误 */
+const MX = [
+  ['ok','ok','ok','part','ok','ok'],
+  ['ok','ok','ok','part','ok','none'],
+  ['bad','ok','none','none','ok','ok'],
+  ['ok','ok','ok','ok','ok','part'],
+  ['ok','ok','ok','none','ok','ok'],
+  ['none','none','none','none','part','ok'],
+  ['part','ok','none','none','none','ok'],
+  ['ok','none','none','none','none','part'],
+  ['ok','ok','ok','ok','ok','ok'],
+  ['none','none','none','none','none','ok']
+];
+const MX_ICON = {ok:'●', part:'◐', none:'○', bad:'●!'};
+const MX_LG   = {ok:'lg1', part:'lg2', none:'lg3', bad:'lg4'};
+/* 向导：餐段与三条进度（其中一条失败，用来呈现异常态） */
+const SEGS = [
+  {k:'wg1', on:false, a:'06:30', b:'10:00'},
+  {k:'wg2', on:true,  a:'10:00', b:'14:00'},
+  {k:'wg3', on:false, a:'14:00', b:'16:30'},
+  {k:'wg4', on:true,  a:'16:30', b:'21:00'},
+  {k:'wg5', on:true,  a:'21:00', b:'23:30'}
+];
+const PROG = [
+  {k:'w_prog1', p:100, st:'ok'},
+  {k:'w_prog2', p:62,  st:'run'},
+  {k:'w_prog3', p:18,  st:'err'}
+];
+
+/* ==========================================================================
+   5. 工具
+   ========================================================================== */
+const $  = s => document.querySelector(s);
+const pad2 = n => String(n).padStart(2,'0');
+const hhmmss = () => { const d=new Date(); return pad2(d.getHours())+':'+pad2(d.getMinutes())+':'+pad2(d.getSeconds()); };
+/* 本机时区：向导第 1 步显示为只读，配错会让所有时长统计整体偏移 */
+function tzLabel(){
+  let z=''; try{ z = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; }catch(e){}
+  const off = -new Date().getTimezoneOffset();
+  const sign = off>=0 ? '+' : '−';
+  return (z ? z+' · ' : '') + 'UTC' + sign + pad2(Math.floor(Math.abs(off)/60)) + ':' + pad2(Math.abs(off)%60);
+}
+const money = n => tr('r_cur') + n.toLocaleString('en-US');
+const num   = n => n.toLocaleString('en-US');
+
+let toastTimer = null;
+function toast(msg){
+  const el = $('#admToast');
+  $('#admToastTx').textContent = msg;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('on'), 2800);
+}
+/* 写回 URL：原型里用 replaceState 保证「复制地址栏 = 复制当前视图状态」。
+   file:// 下可能被拦，失败就静默降级（不影响页面）。 */
+function syncURL(){
+  const q = new URLSearchParams({view:S.view, theme:S.theme, lang:S.lang, input:S.input}).toString();
+  try{ history.replaceState(null,'','?'+q); }catch(e){}
+}
+
+/* ==========================================================================
+   6. 图表（纯手写 SVG，不引任何图表库 / CDN）
+   ========================================================================== */
+function lineChart(){
+  const rtl = meta().dir === 'rtl';
+  const W=600,H=210,L=44,R=16,T=16,B=30;
+  const lo=7.0, hi=11.0, n=TREND.length;
+  /* RTL 下时间轴从右往左走：阿拉伯语阅读顺序是右→左，折线反向会读成「越看越旧」 */
+  const X = i => rtl ? (W-R) - i*(W-L-R)/(n-1) : L + i*(W-L-R)/(n-1);
+  const Y = v => T + (hi-v)*(H-T-B)/(hi-lo);
+  let s = '';
+  for(let i=0;i<=3;i++){
+    const v = lo + (hi-lo)*i/3, y = Y(v).toFixed(1);
+    s += '<line x1="'+L+'" y1="'+y+'" x2="'+(W-R)+'" y2="'+y+'" style="stroke:var(--border)" stroke-width="1"/>';
+    s += '<text x="'+(rtl ? W-R+6 : L-6)+'" y="'+(Number(y)+4)+'" font-size="11" text-anchor="'+(rtl?'start':'end')+'" style="fill:var(--text-3)">'+v.toFixed(1)+'</text>';
+  }
+  /* 目标线 10 分钟：把「达标 / 不达标」画出来，比在图例里写一句更有效 */
+  const yt = Y(10).toFixed(1);
+  s += '<line x1="'+L+'" y1="'+yt+'" x2="'+(W-R)+'" y2="'+yt+'" style="stroke:var(--st-warn)" stroke-width="1.5" stroke-dasharray="5 4"/>';
+  s += '<text x="'+(rtl ? L+2 : W-R)+'" y="'+(Number(yt)-6)+'" font-size="11" text-anchor="'+(rtl?'start':'end')+'" style="fill:var(--st-warn)">'+esc(tr('d_target'))+'</text>';
+  const pts = TREND.map((v,i)=>X(i).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
+  s += '<polyline points="'+pts+'" fill="none" style="stroke:var(--brand)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>';
+  TREND.forEach((v,i)=>{
+    s += '<circle cx="'+X(i).toFixed(1)+'" cy="'+Y(v).toFixed(1)+'" r="3.2" style="fill:var(--bg-surface);stroke:var(--brand)" stroke-width="2"/>';
+  });
+  const today = new Date();
+  for(let i=0;i<n;i+=2){
+    const d = new Date(today.getTime()); d.setDate(d.getDate()-(n-1-i));
+    s += '<text x="'+X(i).toFixed(1)+'" y="'+(H-10)+'" font-size="11" text-anchor="middle" style="fill:var(--text-3)">'+d.getDate()+esc(tr('d_axisDay'))+'</text>';
+  }
+  return '<svg class="adm-chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(tr('d_chartLine'))+'">'+s+'</svg>';
+}
+function barChart(){
+  const rtl = meta().dir === 'rtl';
+  const W=360, rowH=34, H=6*rowH+6, labW=104, valW=48;
+  const tL = rtl ? valW : labW;
+  const tR = rtl ? W-labW : W-valW;
+  const trackW = tR - tL;
+  let s = '';
+  LOAD.forEach((v,i)=>{
+    const ry = i*rowH + 3, cy = ry + rowH/2;
+    s += '<text x="'+(rtl ? W : 0)+'" y="'+(cy+4)+'" font-size="12" text-anchor="'+(rtl?'end':'start')+'" style="fill:var(--text-2)">'+esc(tr('st'+(i+1)))+'</text>';
+    s += '<rect x="'+tL+'" y="'+(cy-8)+'" width="'+trackW+'" height="16" rx="4" style="fill:var(--bg-surface-2)"/>';
+    const bw = Math.max(4, trackW*v/100);
+    const bx = rtl ? tR-bw : tL;
+    s += '<rect x="'+bx+'" y="'+(cy-8)+'" width="'+bw+'" height="16" rx="4" style="fill:'+(v>80?'var(--st-warn)':'var(--brand)')+'"/>';
+    s += '<text x="'+(rtl ? 0 : W)+'" y="'+(cy+4)+'" font-size="12" font-weight="700" text-anchor="'+(rtl?'start':'end')+'" style="fill:var(--text)">'+v+'%</text>';
+  });
+  return '<svg class="adm-chart" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(tr('d_chartBar'))+'">'+s+'</svg>';
+}
+
+/* ==========================================================================
+   7. 顶栏与侧栏
+   ========================================================================== */
+function renderTop(){
+  document.documentElement.setAttribute('lang', meta().tag);
+  document.documentElement.setAttribute('dir',  meta().dir);
+  document.documentElement.setAttribute('data-theme', S.theme);
+  document.title = tr('c_product') + ' · ' + tr(NAV_OF[S.view]);
+
+  $('#admProd').textContent = tr('c_product');
+  $('#admShop').textContent = '/ ' + tr('c_shop');
+  $('#admLangLbl').textContent = tr('c_lang');
+  $('#admThemeLbl').textContent = tr('c_theme');
+  $('#admUpdated').textContent = tr('c_updated', {t:hhmmss()});
+  $('#admTtl').textContent = tr('c_ttl');
+  $('#admRefresh').title = tr('c_refresh');
+  $('#admRefresh').setAttribute('aria-label', tr('c_refresh'));
+
+  /* 语言按钮由 LANG_META 生成：新增语言只改那一处，按钮与 dir 自动跟上 */
+  $('#admLang').innerHTML = Object.keys(LANG_META).map(k=>{
+    const m = LANG_META[k];
+    return '<button type="button" data-act="lang" data-v="'+k+'"'
+      + (k===S.lang?' class="on" aria-pressed="true"':' aria-pressed="false"')
+      + ' title="'+esc(m.name)+'" lang="'+m.tag+'">'+esc(m.short)+'</button>';
+  }).join('');
+  $('#admTheme').querySelectorAll('button').forEach(b=>{
+    const on = b.dataset.v === S.theme;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.textContent = b.dataset.v === 'a' ? tr('c_themeA') : tr('c_themeB');
+  });
+
+  /* 输入方式：类名挂在 #adm 上，所有尺寸令牌由 CSS 的 --touch 派生，这里不做任何尺寸计算 */
+  $('#adm').className = 'adm ' + (S.input === 'touch' ? 'is-touch' : 'is-mouse');
+  $('#admInputLbl').textContent = tr('c_input');
+  $('#admInput').querySelectorAll('button').forEach(b=>{
+    const on = b.dataset.v === S.input;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.textContent = b.dataset.v === 'touch' ? tr('c_inTouch') : tr('c_inMouse');
+  });
+}
+const NAV_OF = {dash:'c_navDash', report:'c_navReport', health:'c_navHealth', wizard:'c_navWizard', menu:'c_navMenu', printer:'c_navPrinter'};
+function renderNav(){
+  const item = (id, ico, off) =>
+    '<button type="button" class="adm-navitem'+(S.view===id?' on':'')+(off?' off':'')+'"'
+    + ' data-act="nav" data-v="'+id+'"' + (off?' aria-disabled="true"':'')
+    + (S.view===id?' aria-current="page"':'') + '>'
+    + '<span class="ico" aria-hidden="true">'+ico+'</span>'
+    + '<span class="lb">'+esc(tr(NAV_OF[id]))+'</span>'
+    + (off?'<span class="soon">'+esc(tr('c_soon'))+'</span>':'') + '</button>';
+  $('#admNav').innerHTML =
+    '<div class="adm-navgrp">'+esc(tr('c_navOps'))+'</div>'
+    + item('dash','▤') + item('report','▦')
+    + '<div class="adm-navgrp">'+esc(tr('c_navCfg'))+'</div>'
+    + item('health','✓') + item('wizard','⚙')
+    + item('menu','☰',true) + item('printer','⎙',true);
+}
+
+/* ==========================================================================
+   8. 视图一：B-03 概览看板
+   ========================================================================== */
+function viewDash(){
+  const RANGES = [['d1','d_r1'],['d5','d_r5'],['d7','d_r7'],['d30','d_r30']];
+  const kpis = KPI.map(k=>{
+    const cls = k.bad ? (k.dir==='up' ? 'bad' : 'good') : (k.dir==='up' ? '' : 'good');
+    return '<div class="adm-kpi ' + k.tone + '">'
+      + '<div class="l">' + esc(tr(k.k)) + '</div>'
+      + '<div class="v"><span class="n">' + k.v + '</span><span class="u">' + esc(tr(k.u)) + '</span></div>'
+      + '<div class="d ' + cls + '"><span aria-hidden="true">' + (k.dir==='up'?'▲':'▼') + '</span>'
+      + '<span class="t">' + k.d + '</span><span class="vs">' + esc(tr('d_vs')) + '</span></div>'
+      + '</div>';
+  }).join('');
+
+  const alerts = ALERTS.map(a=>
+    '<div class="adm-alert sev-' + a.sev + '">'
+    + '<span class="ic" aria-hidden="true">' + (a.sev==='err'?'!':(a.sev==='warn'?'▲':'i')) + '</span>'
+    + '<span class="nm">' + esc(tr(a.k)) + '</span>'
+    + '<span class="ct">' + a.n + '</span>'
+    + '<button type="button" class="adm-btn sm" data-act="go" data-k="' + a.k + '">' + esc(tr('c_go')) + '</button>'
+    + '</div>').join('');
+
+  const rows = RANK.map((r,i)=>
+    '<div class="adm-rankrow' + (r.c==='cat_drink'?' drink':'') + (i<3?' top':'') + '">'
+    + '<span class="rk">' + (i+1) + '</span>'
+    + '<span class="nm">' + esc(tr(r.k)) + '</span>'
+    + '<span class="cat">' + esc(tr(r.c)) + '</span>'
+    + '<span class="qt">' + num(r.q) + '</span>'
+    + '</div>').join('');
+
+  const drows = DRINKS.map((r,i)=>
+    '<div class="adm-rankrow' + (i<3?' top':'') + '">'
+    + '<span class="rk">' + (i+1) + '</span>'
+    + '<span class="nm">' + esc(tr(r.k)) + '</span>'
+    + '<span class="qt">' + num(r.q) + '</span>'
+    + '</div>').join('');
+
+  return '<div class="adm-view">'
+    /* 页头：时间档放页头右侧 —— 它是全局筛选，不是某张卡的私有控件 */
+    + '<div class="adm-hd"><div class="tl"><h1>' + esc(tr('d_title')) + '</h1>'
+    + '<div class="sub">' + esc(tr('d_sub')) + '</div></div>'
+    + '<div class="acts"><div class="adm-seg" role="group" aria-label="' + esc(tr('d_title')) + '">'
+    + RANGES.map(r=>'<button type="button" data-act="range" data-v="' + r[0] + '" class="' + (S.range===r[0]?'on':'') + '"'
+        + ' aria-pressed="' + (S.range===r[0]?'true':'false') + '">' + esc(tr(r[1])) + '</button>').join('')
+    + '</div></div></div>'
+
+    /* KPI：一行五张，第 5 张是「报损数」—— 与退单数分开统计是日报合并展示的前提 */
+    + '<div class="adm-kpis">' + kpis + '</div>'
+
+    /* 图表只两种：折线看趋势、横向条形看负荷。绝不做饼图（占比类信息在档口负荷里读不出排序） */
+    + '<div class="adm-charts">'
+    +   '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('d_trend')) + '</h2>'
+    +     '<span class="note">' + esc(tr('d_trendNote')) + '</span></div>'
+    +     '<div class="adm-card-bd">' + lineChart() + '</div></section>'
+    +   '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('d_load')) + '</h2></div>'
+    +     '<div class="adm-card-bd">' + barChart() + '<div class="adm-hint" style="margin-top:8px">' + esc(tr('d_loadNote')) + '</div></div></section>'
+    + '</div>'
+
+    /* 异常提醒常驻 */
+    + '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('d_alert')) + '</h2>'
+    +   '<span class="note">' + esc(tr('d_alertNote')) + '</span></div>'
+    +   '<div class="adm-alerts">' + alerts + '</div></section>'
+
+    /* 排行榜 + 酒水子榜（决策点：是否单独子榜） */
+    + '<div class="adm-ranks">'
+    +   '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('d_rankAll')) + '</h2>'
+    +     '<span class="note">' + esc(tr('d_rankNote')) + '</span></div>'
+    +     '<div class="adm-rank">' + rows + '</div></section>'
+    +   '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('d_rankDrinks')) + '</h2>'
+    +     '<span class="note">' + esc(tr('d_rankDrinkNote')) + '</span></div>'
+    +     '<div class="adm-card-bd">'
+    +       (S.drinks ? '<div class="adm-rank">' + drows + '</div>'
+                      : '<div class="adm-hint">' + esc(tr('d_rankDrinkNote')) + '</div>')
+    +     '</div></section>'
+    + '</div>'
+    + '<div class="adm-switchline">'
+    +   '<button type="button" class="adm-switch' + (S.drinks?' on':'') + '" data-act="drinks" role="switch"'
+    +     ' aria-checked="' + (S.drinks?'true':'false') + '">'
+    +     '<span class="lb">' + esc(tr('d_split')) + '</span><span class="kn" aria-hidden="true"></span></button>'
+    +   '<span class="hint">' + esc(tr('d_splitHint')) + '</span>'
+    + '</div>'
+    + '</div>';
+}
+
+/* ==========================================================================
+   9. 视图二：B-04 日报
+   ========================================================================== */
+function viewReport(){
+  const sumQ = REPORT.reduce((a,r)=>a+r.q,0);
+  const sumR = REPORT.reduce((a,r)=>a+r.r,0);
+  const sumW = REPORT.reduce((a,r)=>a+r.w,0);
+  const sumA = REPORT.reduce((a,r)=>a+r.a,0);
+
+  const body = REPORT.map(r=>
+    '<tr><td>' + esc(tr(r.k)) + '</td><td>' + esc(tr(r.c)) + '</td>'
+    + '<td class="num">' + num(r.q) + '</td><td class="num">' + num(r.r) + '</td>'
+    + '<td class="num">' + num(r.w) + '</td><td class="num">' + money(r.a) + '</td></tr>').join('');
+
+  /* 损耗总览合并展示：退菜与报损同属「损耗」，分成两处会让人漏算，
+     所以金额与数量都在同一张卡里给出，并明写公式。 */
+  return '<div class="adm-view">'
+    + '<div class="adm-hd"><div class="tl"><h1>' + esc(tr('r_title')) + '</h1>'
+    + '<div class="sub">' + esc(tr('r_sub')) + '</div></div>'
+    + '<div class="acts"><span class="adm-clabel">' + esc(tr('r_date')) + '</span>'
+    + '<input type="date" class="adm-inp" style="width:150px" value="2026-10-24" aria-label="' + esc(tr('r_date')) + '">'
+    + '<button type="button" class="adm-btn" data-act="export" data-v="csv">' + esc(tr('r_export')) + '</button>'
+    + '</div></div>'
+
+    + '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('r_loss')) + '</h2>'
+    +   '<span class="note">' + esc(tr('r_lossFormula')) + '</span></div>'
+    +   '<div class="adm-card-bd"><div class="adm-loss">'
+    +     '<div class="it"><span class="l">' + esc(tr('r_lossRet')) + '</span>'
+    +       '<span class="v">' + sumR + '</span><span class="u">' + esc(tr('u_order')) + '</span></div>'
+    +     '<span class="op" aria-hidden="true">+</span>'
+    +     '<div class="it"><span class="l">' + esc(tr('r_lossWaste')) + '</span>'
+    +       '<span class="v">' + sumW + '</span><span class="u">' + esc(tr('u_portion')) + '</span></div>'
+    +     '<span class="op" aria-hidden="true">=</span>'
+    +     '<div class="it tot"><span class="l">' + esc(tr('r_lossTotal')) + '</span>'
+    +       '<span class="v">' + (sumR+sumW) + '</span><span class="u">' + esc(tr('u_portion')) + '</span></div>'
+    +   '</div></div></section>'
+
+    + '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('r_title')) + '</h2>'
+    +   '<span class="note">' + esc(tr('r_sub')) + '</span></div>'
+    +   '<div class="adm-tblwrap"><table class="adm-tbl">'
+    +   '<colgroup><col style="width:24%"><col style="width:14%"><col style="width:12%">'
+    +     '<col style="width:14%"><col style="width:14%"><col style="width:14%"></colgroup>'
+    +   '<thead><tr>'
+    +     '<th scope="col">' + esc(tr('r_colItem')) + '</th>'
+    +     '<th scope="col">' + esc(tr('r_colCat')) + '</th>'
+    +     '<th scope="col" class="num">' + esc(tr('r_colQty')) + '</th>'
+    +     '<th scope="col" class="num">' + esc(tr('r_colRet')) + '</th>'
+    +     '<th scope="col" class="num">' + esc(tr('r_colWaste')) + '</th>'
+    +     '<th scope="col" class="num">' + esc(tr('r_colAmt')) + '</th></tr></thead>'
+    +   '<tbody>' + body + '</tbody>'
+    +   '<tfoot><tr><td colspan="2">' + esc(tr('c_total')) + '</td>'
+    +     '<td class="num">' + num(sumQ) + '</td><td class="num">' + num(sumR) + '</td>'
+    +     '<td class="num">' + num(sumW) + '</td><td class="num">' + money(sumA) + '</td></tr></tfoot>'
+    +   '</table></div></section>'
+    + '</div>';
+}
+
+/* ==========================================================================
+   10. 视图三：B-18 健康检查（含 B-19 路由矩阵下钻）
+   ========================================================================== */
+const hiArr = g => (T[S.lang] && T[S.lang].hi && T[S.lang].hi[g]) ? T[S.lang].hi[g] : T.zh.hi[g];
+const HI_ICON = {ok:'✓', error:'✕', warn:'!', info:'i'};
+
+function viewHealth(){
+  const cnt = {ok:0, error:0, warn:0, info:0};
+  HC_ORDER.forEach(g=>HC[g].st.forEach(s=>cnt[s]++));
+  const total = HC_ORDER.reduce((a,g)=>a+HC[g].st.length, 0);
+
+  const groups = HC_ORDER.map(g=>{
+    const o = HC[g], arr = hiArr(g);
+    const ok = o.st.filter(s=>s==='ok').length;
+    const items = o.st.map((s,i)=>{
+      const nm = (arr[i] && arr[i][0]) || ('#'+(i+1));
+      const dt = (arr[i] && arr[i][1]) || '';
+      /* Error / Warn 给「去修复」，Info / 通过给「去配置」——
+         通过的项挂一个灰掉的「去修复」是自相矛盾的文案，评审会读错。 */
+      const isFix = (s==='error' || s==='warn');
+      return '<div class="adm-hitem st-' + s + '">'
+        + '<span class="ic" aria-hidden="true">' + HI_ICON[s] + '</span>'
+        + '<span class="tx"><span class="n">' + esc(nm) + '</span><span class="d">' + esc(dt) + '</span></span>'
+        + '<span class="ac"><button type="button" class="adm-btn sm" data-act="fix" data-g="' + g + '" data-i="' + i + '">'
+        + esc(tr(isFix ? 'h_fix' : 'h_cfg')) + '</button></span>'
+        + '</div>';
+    }).join('');
+    const b = k => cnt2(o.st, k);
+    return '<details class="adm-grp" open><summary>'
+      + '<span class="cv" aria-hidden="true">›</span>'
+      + '<span class="nm">' + esc(tr(o.g)) + '</span>'
+      + '<span class="ps">' + esc(tr('h_pass', {x:ok, n:o.st.length})) + '</span>'
+      + '<span class="ar">'
+      +   (b('error')?'<span class="adm-b err">Error ' + b('error') + '</span>':'')
+      +   (b('warn') ?'<span class="adm-b warn">Warn ' + b('warn') + '</span>':'')
+      +   (b('info') ?'<span class="adm-b info">Info ' + b('info') + '</span>':'')
+      + '</span></summary>'
+      + '<div class="adm-hitems">' + items + '</div></details>';
+  }).join('');
+
+  /* B-19 路由矩阵：同页下钻，不新开页面 —— 健康检查与矩阵是同一份解析器结果，
+     分开两页会让人以为是两个独立功能 */
+  const head = '<thead><tr><th class="rowh">' + esc(tr('h_mxSub')) + '</th>'
+    + [1,2,3,4,5,6].map(i=>'<th scope="col">' + esc(tr('mc'+i)) + '</th>').join('') + '</tr></thead>';
+  const body = MX.map((row,ri)=>
+    '<tr><th class="rowh" scope="row">' + esc(tr('mx'+(ri+1))) + '</th>'
+    + row.map(c=>'<td class="c-' + c + '"><span class="adm-mxs ' + c + '" role="img" aria-label="'
+        + esc(tr(MX_LG[c])) + '">' + MX_ICON[c] + '</span></td>').join('')
+    + '</tr>').join('');
+  const legend = ['ok','part','none','bad'].map(k=>
+    '<span class="lg"><span class="adm-mxs ' + k + '" aria-hidden="true">' + MX_ICON[k] + '</span>'
+    + esc(tr(MX_LG[k])) + '</span>').join('');
+
+  const mxPanel = S.matrix
+    ? '<div class="adm-card-bd"><div class="adm-tblwrap"><table class="adm-mx">' + head + '<tbody>' + body + '</tbody></table></div>'
+      + '<div class="adm-legend">' + legend
+      + '<span class="lg" style="color:var(--text-3)">' + esc(tr('h_mxNote')) + '</span></div></div>'
+    : '';
+
+  return '<div class="adm-view">'
+    + '<div class="adm-hd"><div class="tl"><h1>' + esc(tr('h_title')) + '</h1>'
+    + '<div class="sub">' + esc(tr('h_sub')) + '</div></div>'
+    + '<div class="acts">'
+    +   '<button type="button" class="adm-btn" data-act="export" data-v="csv">' + esc(tr('h_exportCsv')) + '</button>'
+    +   '<button type="button" class="adm-btn" data-act="export" data-v="pdf">' + esc(tr('h_exportPdf')) + '</button>'
+    +   '<span class="adm-clabel">' + esc(tr('h_sign')) + '</span>'
+    + '</div></div>'
+
+    + '<div class="adm-sum">'
+    +   '<span class="it err"><span class="adm-b err">' + esc(tr('h_err')) + '</span><b>' + cnt.error + '</b></span>'
+    +   '<span class="it warn"><span class="adm-b warn">' + esc(tr('h_warn')) + '</span><b>' + cnt.warn + '</b></span>'
+    +   '<span class="it info"><span class="adm-b info">' + esc(tr('h_info')) + '</span><b>' + cnt.info + '</b></span>'
+    +   '<span class="it ok"><span class="adm-b ok">' + esc(tr('h_ok')) + '</span><b>' + cnt.ok + '</b></span>'
+    +   '<span class="blk">' + esc(tr('h_block')) + '</span>'
+    + '</div>'
+
+    + '<div class="adm-groups">' + groups + '</div>'
+
+    + '<section class="adm-card"><div class="adm-card-hd"><h2>' + esc(tr('h_mx')) + '</h2>'
+    +   '<span class="note">' + esc(tr('h_mxNote')) + '</span>'
+    +   '<span class="rt"><button type="button" class="adm-btn sm" data-act="mx">'
+    +     esc(tr(S.matrix ? 'c_fold' : 'c_unfold')) + '</button></span></div>'
+    +   mxPanel + '</section>'
+    + '</div>';
+}
+function cnt2(arr, k){ return arr.filter(x=>x===k).length; }
+
+/* ==========================================================================
+   11. 视图四：B-02 初始化向导
+   ========================================================================== */
+function field(labelKey, opts){
+  const o = opts || {};
+  return '<div class="adm-field' + (o.full?' full':'') + '"><label for="' + o.id + '">' + esc(tr(labelKey))
+    + (o.warn ? ' <span class="req">*</span>' : '') + '</label>'
+    + '<input id="' + o.id + '" class="adm-inp" type="' + (o.type||'text') + '"'
+    + (o.ro?' readonly':'') + ' value="' + esc(o.val||'') + '"'
+    + (o.ph?' placeholder="' + esc(o.ph) + '"':'') + '>'
+    + (o.warn ? '<span class="adm-warn">' + esc(tr(o.warn)) + '</span>' : '')
+    + (o.hint ? '<span class="adm-hint">' + esc(o.hint) + '</span>' : '')
+    + '</div>';
+}
+function stepBar(){
+  return '<div class="adm-steps">' + [1,2,3,4,5].map(i=>{
+    const st = i < S.step ? 'done' : (i === S.step ? 'cur' : '');
+    return '<div class="adm-step ' + st + '"' + (i===S.step?' aria-current="step"':'') + '>'
+      + '<span class="no" aria-hidden="true">' + (i < S.step ? '✓' : i) + '</span>'
+      + '<span class="lb">' + esc(tr('w_s'+i)) + '</span>'
+      + (i<5 ? '<span class="ln" aria-hidden="true"></span>' : '')
+      + '</div>';
+  }).join('') + '</div>';
+}
+function wizardBody(){
+  if(S.step === 1){
+    const langs = Object.keys(LANG_META).map(k=>{
+      const m = LANG_META[k];
+      return '<button type="button" class="adm-radio' + (S.lang===k?' on':'') + '" data-act="wlang" data-v="' + k + '"'
+        + ' role="radio" aria-checked="' + (S.lang===k?'true':'false') + '">'
+        + '<span class="dt" aria-hidden="true"></span>'
+        + '<span class="tx"><b lang="' + m.tag + '">' + esc(m.name) + '</b><span>' + esc(m.tag) + '</span></span>'
+        + '</button>';
+    }).join('');
+    return '<div class="adm-card-bd">'
+      + '<div class="adm-field full"><label>' + esc(tr('w_lang')) + '</label>'
+      +   '<div class="adm-radios" role="radiogroup" aria-label="' + esc(tr('w_lang')) + '">' + langs + '</div>'
+      +   '<span class="adm-hint">' + esc(tr('w_langHint')) + '</span></div>'
+      + '<div class="adm-field"><label for="wz-tz">' + esc(tr('w_tz')) + '</label>'
+      +   '<input id="wz-tz" class="adm-inp" type="text" readonly value="' + esc(tzLabel()) + '">'
+      +   '<span class="adm-hint">' + esc(tr('w_tzHint')) + '</span></div>'
+      + '</div>';
+  }
+  if(S.step === 2){
+    const biz = ['bz1','bz2','bz3','bz4'].map((k,i)=>
+      '<button type="button" class="adm-radio' + (i===0?' on':'') + '" data-act="biz" data-v="' + k + '"'
+      + ' role="radio" aria-checked="' + (i===0?'true':'false') + '">'
+      + '<span class="dt" aria-hidden="true"></span><span class="tx"><b>' + esc(tr(k)) + '</b></span></button>').join('');
+    return '<div class="adm-card-bd"><div class="adm-form">'
+      + field('w_shopName', {id:'wz-nm', val:tr('c_shop')})
+      /* 门店编码：创建后不可改 —— 红字警示 + 二次确认提示条，两层提示缺一不可，
+         只写红字用户会习惯性忽略，只写提示条则看不出是哪一格 */
+      + '<div class="adm-field"><label for="wz-cd">' + esc(tr('w_code')) + ' <span class="req">*</span></label>'
+      +   '<input id="wz-cd" class="adm-inp" type="text" value="CN-SH-0342">'
+      +   '<span class="adm-warn">' + esc(tr('w_codeWarn')) + '</span></div>'
+      + '<div class="adm-field full"><div class="adm-notice"><span>' + esc(tr('w_codeConfirm')) + '</span></div></div>'
+      + '<div class="adm-field full"><label>' + esc(tr('w_biz')) + '</label>'
+      +   '<div class="adm-radios" role="radiogroup" aria-label="' + esc(tr('w_biz')) + '">' + biz + '</div>'
+      +   '<span class="adm-hint">' + esc(tr('w_bizHint')) + '</span></div>'
+      + field('w_addr', {id:'wz-addr', full:true, val:'上海市中山南路 342 号 1F'})
+      + field('w_tel',  {id:'wz-tel',  val:'021-5432 1088'})
+      + '</div></div>';
+  }
+  if(S.step === 3){
+    const eng = [['sqlite','w_sqlite','w_sqliteNote'],['sqlsrv','w_sqlsrv','w_sqlsrvNote']].map(e=>
+      '<button type="button" class="adm-radio' + (S.engine===e[0]?' on':'') + '" data-act="engine" data-v="' + e[0] + '"'
+      + ' role="radio" aria-checked="' + (S.engine===e[0]?'true':'false') + '">'
+      + '<span class="dt" aria-hidden="true"></span>'
+      + '<span class="tx"><b>' + esc(tr(e[1])) + '</b><span>' + esc(tr(e[2])) + '</span></span></button>').join('');
+    const res = S.dbTest==='ok'  ? '<div class="adm-notice info"><span>' + esc(tr('w_testOk'))  + '</span></div>'
+              : S.dbTest==='fail'? '<div class="adm-notice err"><span>' + esc(tr('w_testFail')) + '</span></div>' : '';
+    return '<div class="adm-card-bd">'
+      + '<div class="adm-field full"><label>' + esc(tr('w_engine')) + '</label>'
+      +   '<div class="adm-radios" role="radiogroup" aria-label="' + esc(tr('w_engine')) + '">' + eng + '</div></div>'
+      + '<div class="adm-form">'
+      +   field('w_host',  {id:'wz-host', val:'127.0.0.1'})
+      +   field('w_port',  {id:'wz-port', val:'1433'})
+      +   field('w_dbname',{id:'wz-db',   val:'kds_prod'})
+      +   field('w_user',  {id:'wz-user', val:'kds_admin'})
+      +   field('w_pwd',   {id:'wz-pwd', type:'password', val:'********'})
+      + '</div>'
+      + '<div style="margin-top:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      +   '<button type="button" class="adm-btn primary" data-act="testconn">' + esc(tr('w_test')) + '</button>'
+      +   (res ? '<span style="flex:1 1 260px;min-width:0">' + res + '</span>' : '')
+      + '</div></div>';
+  }
+  if(S.step === 4){
+    const segs = SEGS.map((s,i)=>
+      '<div class="adm-segrow">'
+      + '<button type="button" class="adm-chk' + (s.on?' on':'') + '" data-act="seg" data-i="' + i + '"'
+      + ' role="checkbox" aria-checked="' + (s.on?'true':'false') + '" aria-label="' + esc(tr(s.k)) + '">✓</button>'
+      + '<span class="nm">' + esc(tr(s.k)) + '</span>'
+      + '<span class="tm"><input class="adm-inp" type="time" value="' + s.a + '" aria-label="' + esc(tr(s.k)) + '">'
+      + '<span aria-hidden="true">–</span>'
+      + '<input class="adm-inp" type="time" value="' + s.b + '" aria-label="' + esc(tr(s.k)) + '"></span>'
+      + '</div>').join('');
+    return '<div class="adm-card-bd">'
+      + '<div class="adm-form">'
+      +   field('w_dayStart', {id:'wz-day', type:'time', val:'06:00', hint:tr('w_dayHint')})
+      + '</div>'
+      + '<div style="margin-top:12px"><div class="adm-hint" style="margin-bottom:6px">' + esc(tr('w_seg')) + '</div>'
+      + '<div class="adm-segs">' + segs + '</div>'
+      + '<div class="adm-hint" style="margin-top:6px">' + esc(tr('w_segHint')) + '</div></div>'
+      + '</div>';
+  }
+  const prog = PROG.map(p=>
+    '<div class="adm-progrow"><div class="top"><span class="nm">' + esc(tr(p.k)) + '</span>'
+    + (p.st==='err'
+        ? '<span class="adm-b err">' + esc(tr('w_progFail')) + '</span>'
+          + '<button type="button" class="adm-btn sm" data-act="retry" style="margin-inline-start:auto">'
+          + esc(tr('w_retry')) + '</button>'
+        : '<span class="pc">' + p.p + '%</span>')
+    + '</div><div class="adm-bar ' + (p.st==='err'?'err':(p.st==='ok'?'ok':'')) + '">'
+    + '<i style="width:' + p.p + '%"></i></div></div>').join('');
+  return '<div class="adm-card-bd"><div class="adm-form">'
+    + field('w_name',   {id:'wz-an',  val:'张伟'})
+    + field('w_empno',  {id:'wz-ano', val:'E1024'})
+    + field('w_mobile', {id:'wz-am',  val:'138 0013 8000'})
+    + field('w_pwd',    {id:'wz-ap',  type:'password', val:'********'})
+    + field('w_pwd2',   {id:'wz-ap2', type:'password', val:'********'})
+    + '</div>'
+    /* 三条进度条静态呈现不同进度，其中一条失败 —— 安装失败是常态，
+       原型必须把「失败 / 重试」这条路径画出来，否则评审只会看到happy path */
+    + '<div class="adm-prog" style="margin-top:14px">' + prog + '</div>'
+    + '</div>';
+}
+function viewWizard(){
+  const last = S.step === 5;
+  return '<div class="adm-view">'
+    + '<div class="adm-hd"><div class="tl"><h1>' + esc(tr('w_title')) + '</h1>'
+    + '<div class="sub">' + esc(tr('w_sub')) + '</div></div>'
+    + '<div class="acts"><button type="button" class="adm-btn quiet" data-act="skip">'
+    +   esc(tr('w_skip')) + '</button></div></div>'
+    + stepBar()
+    + '<section class="adm-card"><div class="adm-card-hd"><h2>'
+    +   S.step + ' / 5 · ' + esc(tr('w_s'+S.step)) + '</h2>'
+    +   '<span class="note">' + esc(tr('w_sub')) + '</span></div>'
+    +   wizardBody()
+    +   '<div class="adm-card-bd" style="border-top:1px solid var(--adm-line)"><div class="adm-wzfoot">'
+    +     (S.step>1 ? '<button type="button" class="adm-btn" data-act="step" data-v="prev">' + esc(tr('w_prev')) + '</button>' : '')
+    +     '<span class="sp"></span>'
+    +     (last ? '<button type="button" class="adm-btn primary" data-act="finish">' + esc(tr('w_finish')) + '</button>'
+                : '<button type="button" class="adm-btn primary" data-act="step" data-v="next">' + esc(tr('w_next')) + '</button>')
+    +   '</div></div></section>'
+    /* 重入策略：一行小字 + 一条「上次未完成」提示条样例 */
+    + '<div class="adm-notice info"><span>' + esc(tr('w_resume')) + '</span>'
+    +   '<span class="ac"><button type="button" class="adm-btn sm" data-act="step" data-v="3">'
+    +   esc(tr('c_go')) + '</button></span></div>'
+    + '<div class="adm-footnote">' + esc(tr('w_resumeHint')) + '</div>'
+    + '</div>';
+}
+
+/* ==========================================================================
+   12. 渲染与交互
+   ========================================================================== */
+function render(){
+  renderTop();
+  renderNav();
+  const c = $('#admContent');
+  c.innerHTML = S.view==='dash'  ? viewDash()
+              : S.view==='report'? viewReport()
+              : S.view==='health'? viewHealth()
+              : viewWizard();
+  c.scrollTop = 0;
+  syncURL();
+}
+
+document.addEventListener('click', function(ev){
+  const b = ev.target.closest('[data-act]');
+  if(!b) return;
+  const a = b.dataset ? b.dataset.act : '';
+  if(a === 'nav'){
+    if(b.classList.contains('off')){ toast(tr('c_soon')); return; }
+    S.view = b.dataset.v; render(); return;
+  }
+  if(a === 'lang'){
+    if(!LANG_META[b.dataset.v]) return;
+    S.lang = b.dataset.v;
+    /* 语言切换只改 <html lang/dir>，不换 CSS 文件 —— RTL 镜像由逻辑属性承担 */
+    render(); return;
+  }
+  if(a === 'wlang'){ S.lang = b.dataset.v; render(); return; }
+  if(a === 'theme'){ S.theme = b.dataset.v; render(); return; }
+  if(a === 'input'){ S.input = b.dataset.v; render(); return; }
+  if(a === 'refresh'){ $('#admUpdated').textContent = tr('c_updated', {t:hhmmss()}); toast(tr('c_refresh')); return; }
+  if(a === 'range'){ S.range = b.dataset.v; render(); return; }
+  if(a === 'drinks'){ S.drinks = !S.drinks; render(); return; }
+  if(a === 'go'){ toast(tr('c_go') + ' · ' + tr(b.dataset.k)); return; }
+  if(a === 'export'){
+    toast(tr('c_export') + ' · ' + (b.dataset.v === 'pdf' ? tr('h_exportPdf') : tr('h_exportCsv'))); return;
+  }
+  if(a === 'fix'){
+    const g = b.dataset.g, i = Number(b.dataset.i), arr = hiArr(g);
+    toast(tr('h_toast', {p:tr(HC[g].p), a:(arr[i] && arr[i][0]) || ''})); return;
+  }
+  if(a === 'mx'){ S.matrix = !S.matrix; render(); return; }
+  if(a === 'testconn'){ S.dbTest = (S.dbTest === 'ok') ? 'fail' : 'ok'; render(); return; }
+  if(a === 'biz' || a === 'engine'){ return; }
+  if(a === 'seg'){ const i = Number(b.dataset.i); SEGS[i].on = !SEGS[i].on; render(); return; }
+  if(a === 'step'){
+    const v = b.dataset.v;
+    if(v === 'prev') S.step = Math.max(1, S.step - 1);
+    else if(v === 'next') S.step = Math.min(5, S.step + 1);
+    else S.step = Math.max(1, Math.min(5, Number(v) || 1));
+    render(); return;
+  }
+  if(a === 'skip'){ toast(tr('w_skip') + ' · ' + tr('w_s' + S.step)); return; }
+  if(a === 'finish'){ toast(tr('w_done')); return; }
+  if(a === 'retry'){ toast(tr('w_retry') + ' · ' + tr('w_prog3')); return; }
+});
+
+/* 数字键 1–4 切视图，方便评审快速比对四屏。
+   焦点在输入框里时必须放行 —— 否则在「门店名称」里打 1 会直接跳去日报 */
+document.addEventListener('keydown', function(ev){
+  if(ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const t = ev.target;
+  if(t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+  const i = Number(ev.key) - 1;
+  if(Number.isInteger(i) && i >= 0 && i < VIEWS.length){ S.view = VIEWS[i]; render(); }
+});
+
+render();
+
+})();
+</script>
+</body>
+</html>

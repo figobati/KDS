@@ -1,0 +1,462 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kds.local/schema/v1/common.schema.json",
+  "title": "KDS 契约公共定义 v1",
+  "description": "事件信封、枚举号段、共用类型。所有 KDS 与 POS 之间的报文共享本文件的定义。号段一经发布只增不改（§2.16.1）。",
+  "type": "object",
+  "$defs": {
+    "Guid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "GUID。传输层建议小写带横线（与库内存法一致，§8.1）"
+    },
+    "GuidOrEmpty": {
+      "type": "string",
+      "description": "GUID 或空 GUID。外卖/无桌台场景**必须填 00000000-0000-0000-0000-000000000000，不得为 null**（§1.6）",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "DateTimeOffset": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 带时区偏移，如 2026-10-21T12:30:00+08:00。禁止无偏移的本地时间"
+    },
+    "Lang": {
+      "type": "string",
+      "enum": [
+        "zh-CN",
+        "en-US",
+        "zh-TW"
+      ],
+      "description": "V1 支持的界面语言（BCP-47）"
+    },
+    "LocalizedText": {
+      "type": "object",
+      "description": "多语言文本，键为语言码、值为该语言文本。缺失语言按回退链处理（§11.1）",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "zh-CN",
+          "en-US",
+          "zh-TW"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "Qty": {
+      "type": "number",
+      "multipleOf": 0.001,
+      "minimum": 0,
+      "description": "数量，decimal(18,3)。称重菜允许小数（§4.5），步长由 QtyStep 决定"
+    },
+    "PositiveQty": {
+      "type": "number",
+      "multipleOf": 0.001,
+      "exclusiveMinimum": 0,
+      "description": "正数数量（本次完成/本次退/本次报损的份数必须 > 0）"
+    },
+    "Money": {
+      "type": "number",
+      "multipleOf": 0.0001,
+      "description": "金额，decimal(18,4)。权威在 POS，KDS 只透传（§13.6.7）"
+    },
+    "LineNo": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "POS 侧行号。**一行一条明细，KDS 不跨 LineNo 合并**；加菜必须用新 LineNo（§4.6.1）"
+    },
+    "Stage": {
+      "type": "string",
+      "enum": [
+        "Prep",
+        "Cook",
+        "Expo"
+      ],
+      "description": "工序阶段：切配 / 制作 / 传菜"
+    },
+    "WorkflowStage": {
+      "type": "string",
+      "enum": [
+        "Pending",
+        "Prep",
+        "Cook",
+        "Expo",
+        "Done",
+        "Cancelled",
+        "Void",
+        "Closed"
+      ],
+      "description": "主状态 8 态（§2.15.1）。**终态 = Done / Cancelled / Void / Closed**（终态集合必须集中定义，禁止散写）"
+    },
+    "StageStatus": {
+      "type": "string",
+      "enum": [
+        "Waiting",
+        "Doing",
+        "Completed",
+        "Skipped"
+      ],
+      "description": "阶段状态 4 态，与主状态正交（§2.15.2）"
+    },
+    "OrderType": {
+      "type": "string",
+      "enum": [
+        "DineIn",
+        "Takeaway",
+        "Pickup"
+      ],
+      "description": "堂食 / 外卖 / 自提。外卖单无桌台时 TableId 填空 GUID"
+    },
+    "MealPeriod": {
+      "type": "string",
+      "enum": [
+        "Breakfast",
+        "Lunch",
+        "Dinner",
+        "LateNight",
+        "Closed"
+      ],
+      "description": "餐段快照（§2.13.3）。Closed = 非营业时段，不计入任何餐段报表"
+    },
+    "NotifyState": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "通知单状态序号（§2.16.1，KDS 定义、POS 填）：0 未知 / 10 待叫起 / 20 已起菜 / 30 等叫 / 40 已出品 / 50 已退菜 / 60 已报损 / 70 已清理。★ 刻意**不写 enum**：预留值（如 35）应被业务层『忽略并告警』而非 schema 拒收（§2.16.6）"
+    },
+    "NotifyStateKnown": {
+      "type": "integer",
+      "enum": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70
+      ],
+      "description": "已定义的通知单状态号段。仅用于文档与校验器输出，**不要用于入站校验**"
+    },
+    "NotifyFlags": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15,
+      "description": "通知单标记位（§2.16.2）：1 催菜 / 2 加急 / 4 赠菜 / 8 预订。按位或组合；**未知位由业务层忽略，不拒收**"
+    },
+    "VoidReasonCode": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "报损原因序号（§2.17.1）：0 未指定 / 10 做错菜 / 20 客人不满意 / 30 超时太久 / 40 打翻掉落 / 50 质量问题 / 60 客人已离开 / 70 操作失误 / 99 其他。未知值归为 99 + 告警"
+    },
+    "VoidReasonCodeKnown": {
+      "type": "integer",
+      "enum": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        99
+      ],
+      "description": "已定义的报损原因号段（仅用于文档/校验器）"
+    },
+    "SoldOutType": {
+      "type": "string",
+      "enum": [
+        "UntilManual",
+        "UntilTime",
+        "LimitedQty"
+      ],
+      "description": "沽清时效（§2.18.4）：UntilManual 一直沽清 / UntilTime 到点自动恢复 / LimitedQty 限量卖完自动沽清。**LimitedQty 按已下单份数扣减**（下单即占库存）"
+    },
+    "SoldOutStatus": {
+      "type": "string",
+      "enum": [
+        "Requested",
+        "Active",
+        "Rejected",
+        "Ended"
+      ],
+      "description": "沽清状态机（§9.15b）：Requested 申请中 → Active 生效中 → Ended 已结束；Requested 被 POS 否决 → Rejected"
+    },
+    "SoldOutEndReason": {
+      "type": "string",
+      "enum": [
+        "Manual",
+        "AutoTime",
+        "LimitReached",
+        "CrossDay"
+      ],
+      "description": "沽清结束原因：Manual 人工恢复 / AutoTime 到点 / LimitReached 限量售完 / **CrossDay 跨营业日失效**（昨天的『卖完了』不该管今天，§2.18.7）"
+    },
+    "SoldOutReasonCode": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "沽清原因序号（§2.18.6）：0 未指定 / 10 食材售罄 / 20 设备故障 / 30 产能不足 / 40 质量不合格 / 50 临时停售 / 99 其他。未知值归 99 + 告警",
+      "examples": [
+        10,
+        20,
+        30,
+        40,
+        50,
+        99
+      ]
+    },
+    "SoldOutTarget": {
+      "type": "object",
+      "description": "沽清目标（品项级或品类级）。**至少提供 DishItemId / ItemCode / DishTypeId 之一**",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "DishItemId": {
+          "$ref": "#/$defs/Guid"
+        },
+        "ItemCode": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "DishTypeId": {
+          "$ref": "#/$defs/Guid",
+          "description": "品类级沽清（少见，一般用批量品项替代）"
+        },
+        "TypeCode": {
+          "type": "string",
+          "maxLength": 64
+        }
+      }
+    },
+    "ErrorCode": {
+      "type": "string",
+      "description": "错误码（§10.6）。闭集，见 enum",
+      "enum": [
+        "VALIDATION_FAILED",
+        "DUPLICATE_EVENT",
+        "ORDER_NOT_FOUND",
+        "DETAIL_NOT_FOUND",
+        "DETAIL_CANCELLED",
+        "DETAIL_CLOSED",
+        "CANCEL_EXCEEDS_REMAINING",
+        "VOID_EXCEEDS_COMPLETED",
+        "VERSION_CONFLICT",
+        "STAGE_INVALID",
+        "ITEM_SOLDOUT",
+        "POS_CLOCK_SKEW",
+        "UNKNOWN_NOTIFY_STATE",
+        "POS_ROLE_UNMAPPED",
+        "UNDO_WINDOW_EXPIRED",
+        "UNDO_STATE_ADVANCED",
+        "UNDO_ALREADY_REVERTED",
+        "UNDO_CONFLICT",
+        "AUTH_REQUIRED",
+        "AUTH_FAILED",
+        "FORBIDDEN",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "Envelope": {
+      "type": "object",
+      "description": "事件信封（§10.2）。所有入站事件的外层结构",
+      "required": [
+        "EventId",
+        "EventType",
+        "PosSource",
+        "StoreId",
+        "Timestamp",
+        "ProtocolVersion",
+        "Payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "EventId": {
+          "$ref": "#/$defs/Guid",
+          "description": "幂等键。同 EventId 重复投递 → 返回首次处理结果，不重复执行"
+        },
+        "EventType": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64
+        },
+        "PosSource": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "StoreId": {
+          "$ref": "#/$defs/Guid"
+        },
+        "Timestamp": {
+          "$ref": "#/$defs/DateTimeOffset",
+          "description": "POS 侧事件发生时间。**仅用于排序与展示**；时长计算一律以 Master 接收时间为基准（§10.2）"
+        },
+        "ProtocolVersion": {
+          "type": "string",
+          "pattern": "^1\\.[0-9]+$"
+        },
+        "Payload": {
+          "type": "object"
+        }
+      }
+    },
+    "AuditFields": {
+      "type": "object",
+      "description": "可选审计字段，入站事件可携带",
+      "additionalProperties": true,
+      "properties": {
+        "OccurredAt": {
+          "$ref": "#/$defs/DateTimeOffset",
+          "description": "业务发生时刻。**若与 Timestamp 同义则任填其一**；计时类事件（Item.Notify / Item.Void）优先用本字段"
+        },
+        "OperatorName": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "POS 侧操作人（仅标注，不做权限判断）"
+        },
+        "Remark": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "备注，**KDS 不解析**（避免文本依赖）"
+        }
+      }
+    },
+    "DishLine": {
+      "type": "object",
+      "description": "订单明细行（Order.Create / Order.Update 共用）",
+      "required": [
+        "LineNo",
+        "DishName",
+        "Qty"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "LineNo": {
+          "$ref": "#/$defs/LineNo"
+        },
+        "DishItemId": {
+          "$ref": "#/$defs/Guid"
+        },
+        "ItemCode": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "品项编码，优先于 DishItemId 用于匹配基础资料"
+        },
+        "DishName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "Spec": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "Taste": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "口味/做法"
+        },
+        "Method": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "Qty": {
+          "$ref": "#/$defs/Qty"
+        },
+        "Unit": {
+          "type": "string",
+          "maxLength": 16,
+          "default": "份"
+        },
+        "QtyStep": {
+          "type": "number",
+          "multipleOf": 0.1,
+          "description": "数量步长（称重菜用，§4.5）"
+        },
+        "IsGift": {
+          "type": "boolean",
+          "default": false
+        },
+        "IsRush": {
+          "type": "boolean",
+          "default": false
+        },
+        "UnitPrice": {
+          "$ref": "#/$defs/Money"
+        },
+        "Amount": {
+          "$ref": "#/$defs/Money"
+        },
+        "WaiterName": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "SourceTableId": {
+          "$ref": "#/$defs/GuidOrEmpty",
+          "description": "该行归属的桌台关联。联台/拼桌时逐行标注；**联台期间加菜必须携带本行归属桌台**（v6.98，否则组卡内桌台标签无依据）；无桌台填空 GUID"
+        },
+        "IsComboItem": {
+          "type": "boolean",
+          "default": false
+        },
+        "ComboNo": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ComboName": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "ComboSeq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ComboItemTotal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "SpecialFlags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "description": "扩展标记（如『少油』『不要葱』），KDS 只透传"
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "description": "失败响应（HTTP 4xx/5xx 或出站 Error 事件）",
+      "required": [
+        "ErrorCode",
+        "Message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ErrorCode": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "Message": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "EventId": {
+          "$ref": "#/$defs/Guid",
+          "description": "关联的入站事件（可为空）"
+        },
+        "TraceId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "Details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

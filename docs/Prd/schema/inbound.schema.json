@@ -1,0 +1,480 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kds.local/schema/v1/inbound.schema.json",
+  "title": "KDS 入站事件 v1（POS → KDS）",
+  "description": "16 个入站事件。每个变体都是『信封 + const EventType + 具体 Payload』。入站额外字段一律拒绝（additionalProperties: false）——POS 多发字段说明理解有偏差。",
+  "$ref": "common.schema.json",
+  "oneOf": [
+    { "$ref": "#/$defs/OrderCreate" },
+    { "$ref": "#/$defs/OrderUpdate" },
+    { "$ref": "#/$defs/ItemRemove" },
+    { "$ref": "#/$defs/ItemRename" },
+    { "$ref": "#/$defs/OrderCancel" },
+    { "$ref": "#/$defs/OrderRemind" },
+    { "$ref": "#/$defs/OrderRush" },
+    { "$ref": "#/$defs/OrderHold" },
+    { "$ref": "#/$defs/OrderRelease" },
+    { "$ref": "#/$defs/OrderSplit" },
+    { "$ref": "#/$defs/MenuSync" },
+    { "$ref": "#/$defs/DiningTableSync" },
+    { "$ref": "#/$defs/StationSync" },
+    { "$ref": "#/$defs/ItemNotify" },
+    { "$ref": "#/$defs/ItemVoid" },
+    { "$ref": "#/$defs/ItemSoldOut" },
+    { "$ref": "#/$defs/StaffSync" }
+  ],
+  "$defs": {
+
+    "TableRef": {
+      "type": "object",
+      "description": "订单-桌台关联（一单多桌 = 联台；一桌多单 = 拼桌）。业务唯一键 (PosOrderNo, TableId)",
+      "required": ["TableId", "TableCode"],
+      "additionalProperties": false,
+      "properties": {
+        "TableId": { "$ref": "common.schema.json#/$defs/GuidOrEmpty", "description": "KDS 桌台 Uid；无桌台填空 GUID（**不得为 null**）" },
+        "ExternalTableId": { "type": "string", "maxLength": 64 },
+        "TableCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "SortOrder": { "type": "integer", "minimum": 0 },
+        "AreaName": { "type": "string", "maxLength": 200 }
+      }
+    },
+
+    "Base": {
+      "type": "object",
+      "allOf": [{ "$ref": "common.schema.json#/$defs/Envelope" }],
+      "required": ["EventType", "Payload"]
+    },
+
+    "OrderCreate": {
+      "description": "新建订单（含全部明细）。同 EventId 幂等；同 PosOrderNo 且未归档 → 合并/更新而非新建",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Create" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "OrderType", "OrderCreateTime", "Tables", "Lines"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "OrderType": { "$ref": "common.schema.json#/$defs/OrderType" },
+            "GuestCount": { "type": "integer", "minimum": 0 },
+            "OrderCreateTime": { "$ref": "common.schema.json#/$defs/DateTimeOffset", "description": "POS 点菜时间。**超时不用它算**（从起菜算，§4.4.1），仅用于『下单→起菜』前置分析" },
+            "IsSharedTable": { "type": "boolean", "default": false },
+            "Remark": { "$ref": "common.schema.json#/$defs/LocalizedText" },
+            "Tables": {
+              "type": "array",
+              "minItems": 1,
+              "description": "至少 1 项。外卖/无桌台时提供 1 项且 TableId = 空 GUID",
+              "items": { "$ref": "#/$defs/TableRef" }
+            },
+            "Lines": { "type": "array", "minItems": 1, "items": { "$ref": "common.schema.json#/$defs/DishLine" } }
+          }
+        }
+      }
+    },
+
+    "OrderUpdate": {
+      "description": "改单。明细按 LineNo 匹配：存在则更新，不存在则新增。**加菜必须用新 LineNo**（同 LineNo 加大 Qty 视为改数量并记 Warning）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Update" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "Lines"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "GuestCount": { "type": "integer", "minimum": 0 },
+            "Remark": { "$ref": "common.schema.json#/$defs/LocalizedText" },
+            "Tables": { "type": "array", "items": { "$ref": "#/$defs/TableRef" } },
+            "Lines": { "type": "array", "minItems": 1, "items": { "$ref": "common.schema.json#/$defs/DishLine" } }
+          }
+        }
+      }
+    },
+
+    "ItemRemove": {
+      "description": "退菜（按份）。**只能退未出品份**；已出品走 Item.Void。超退 → CANCEL_EXCEEDS_REMAINING",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Remove" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "Qty"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "Qty": { "$ref": "common.schema.json#/$defs/PositiveQty", "description": "本次退份数（不是整行份数）" },
+            "Reason": { "type": "string", "maxLength": 200, "description": "**自由文本**（退菜由 POS 发起，KDS 不强制枚举，§4.7.2）" },
+            "CancelledAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "ItemRename": {
+      "description": "临时菜改名。只改进行中明细，历史归档不改",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Rename" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "DishName"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "DishName": { "type": "string", "minLength": 1, "maxLength": 200 }
+          }
+        }
+      }
+    },
+
+    "OrderCancel": {
+      "description": "整单取消。非终态明细全部置 Cancelled；已归档明细仅记日志",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Cancel" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "Reason": { "type": "string", "maxLength": 200 }
+          }
+        }
+      }
+    },
+
+    "OrderRemind": {
+      "description": "催菜。不传 LineNo 表示整单催",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Remind" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "Count": { "type": "integer", "minimum": 1, "default": 1 }
+          }
+        }
+      }
+    },
+
+    "OrderRush": {
+      "description": "加急。不传 LineNo 表示整单加急",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Rush" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" }
+          }
+        }
+      }
+    },
+
+    "OrderHold": {
+      "description": "等叫（订单级）。KDS 扇出到该单全部非终态明细：NotifyState=30、HoldCount+1、**已用时长归 0**（不是暂停）。与 Item.Notify 冲突时按 OccurredAt 后到者生效",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Hold" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "Reason": { "type": "string", "maxLength": 200 },
+            "OccurredAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "OrderRelease": {
+      "description": "起菜 / 取消等叫（订单级）。KDS 扇出到全部非终态明细：NotifyState=20、LastFireAt=OccurredAt、**从 0 重新计时**",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Release" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "OccurredAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "OrderSplit": {
+      "description": "拆单 / 并台 / 换桌（桌台归属变更）。KDS 重建受影响 OrderTableRel 并改挂明细",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Order.Split" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "Tables"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "Tables": {
+              "type": "array",
+              "minItems": 1,
+              "description": "变更后的完整桌台归属集合（KDS 以本字段为全量真值重建关联）",
+              "items": { "$ref": "#/$defs/TableRef" }
+            },
+            "Moves": {
+              "type": "array",
+              "description": "可选：逐行迁移说明（仅用于日志与校验，KDS 以 Tables 为准）",
+              "items": {
+                "type": "object",
+                "required": ["LineNo", "ToTableId"],
+                "additionalProperties": false,
+                "properties": {
+                  "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+                  "ToTableId": { "$ref": "common.schema.json#/$defs/GuidOrEmpty" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "MenuSync": {
+      "description": "品项基础资料同步。按 ItemCode upsert；**不修改进行中订单的快照字段**",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Menu.Sync" },
+        "Payload": {
+          "type": "object",
+          "required": ["Items"],
+          "additionalProperties": false,
+          "properties": {
+            "Items": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["ItemCode", "ItemName"],
+                "additionalProperties": false,
+                "properties": {
+                  "ItemCode": { "type": "string", "maxLength": 64 },
+                  "ItemName": { "$ref": "common.schema.json#/$defs/LocalizedText" },
+                  "DishItemId": { "$ref": "common.schema.json#/$defs/Guid" },
+                  "TypeCode": { "type": "string", "maxLength": 64, "description": "品项类型编码，用于档口反选" },
+                  "SaleMode": { "type": "string", "enum": ["ByPiece", "ByWeight"] },
+                  "QtyStep": { "type": "number", "multipleOf": 0.1, "exclusiveMinimum": 0 },
+                  "Unit": { "type": "string", "maxLength": 16 },
+                  "TotalTimeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400, "description": "菜品特例超时；不传则用门店默认（§4.4.2）" },
+                  "StagePath": { "type": "string", "pattern": "^(Prep|Cook|Expo)(,(Prep|Cook|Expo))*$" },
+                  "StageStandardSeconds": { "type": "string", "maxLength": 500, "description": "阶段标准工时，**仅分析用不参与超时判定**" },
+                  "IsEnabled": { "type": "boolean", "default": true },
+                  "SortOrder": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "DiningTableSync": {
+      "description": "桌台基础资料同步。**必须携带桌台 Uid**（否则无法与关联对齐）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "DiningTable.Sync" },
+        "Payload": {
+          "type": "object",
+          "required": ["Tables"],
+          "additionalProperties": false,
+          "properties": {
+            "Tables": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["TableId", "TableCode"],
+                "additionalProperties": false,
+                "properties": {
+                  "TableId": { "$ref": "common.schema.json#/$defs/Guid" },
+                  "ExternalTableId": { "type": "string", "maxLength": 64 },
+                  "TableCode": { "type": "string", "maxLength": 64 },
+                  "TableName": { "$ref": "common.schema.json#/$defs/LocalizedText" },
+                  "AreaName": { "type": "string", "maxLength": 200 },
+                  "SeatCount": { "type": "integer", "minimum": 1 },
+                  "SortOrder": { "type": "integer" },
+                  "IsEnabled": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "StationSync": {
+      "description": "档口基础资料同步。按 StationCode upsert。反选三字段为逗号分隔 GUID（`,g1,g2,` 规范格式）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Station.Sync" },
+        "Payload": {
+          "type": "object",
+          "required": ["Stations"],
+          "additionalProperties": false,
+          "properties": {
+            "Stations": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["StationCode", "Name", "Role"],
+                "additionalProperties": false,
+                "properties": {
+                  "StationCode": { "type": "string", "maxLength": 64 },
+                  "Name": { "$ref": "common.schema.json#/$defs/LocalizedText" },
+                  "Role": { "$ref": "common.schema.json#/$defs/Stage" },
+                  "SortOrder": { "type": "integer" },
+                  "IncludeTypeIds": { "type": "string", "maxLength": 4000, "pattern": "^$|^,([0-9a-fA-F-]{36},)*$" },
+                  "ExcludeItemIds": { "type": "string", "maxLength": 8000, "pattern": "^$|^,([0-9a-fA-F-]{36},)*$" },
+                  "IncludeItemIds": { "type": "string", "maxLength": 8000, "pattern": "^$|^,([0-9a-fA-F-]{36},)*$" },
+                  "IsEnabled": { "type": "boolean", "default": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "ItemNotify": {
+      "description": "通知单状态（单菜级）。★ NotifyState 刻意不用 enum：预留值应被『忽略 + 告警』而非拒收（§2.16.6）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Notify" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "NotifyState", "OccurredAt"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "NotifyState": { "$ref": "common.schema.json#/$defs/NotifyState" },
+            "NotifyFlags": { "$ref": "common.schema.json#/$defs/NotifyFlags" },
+            "OccurredAt": {
+              "$ref": "common.schema.json#/$defs/DateTimeOffset",
+              "description": "**必填**：计时以本字段为准（起菜记 LastFireAt、出品记 ProducedAt）。与 Master 偏差 > 5 分钟 → 用接收时间并记 POS_CLOCK_SKEW"
+            },
+            "Remark": { "type": "string", "maxLength": 200, "description": "仅落日志，**KDS 不解析**" }
+          }
+        }
+      }
+    },
+
+    "ItemVoid": {
+      "description": "报损（POS 发起）。只能报损已出品份：VoidQty ≤ CompletedQty − 已报损，超出 → VOID_EXCEEDS_COMPLETED",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.Void" },
+        "Payload": {
+          "type": "object",
+          "required": ["PosOrderNo", "LineNo", "VoidQty", "OccurredAt"],
+          "additionalProperties": false,
+          "properties": {
+            "PosOrderNo": { "type": "string", "maxLength": 64 },
+            "LineNo": { "$ref": "common.schema.json#/$defs/LineNo" },
+            "VoidQty": { "$ref": "common.schema.json#/$defs/PositiveQty" },
+            "VoidReasonCode": { "$ref": "common.schema.json#/$defs/VoidReasonCode" },
+            "VoidRemark": { "type": "string", "maxLength": 200 },
+            "OccurredAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" }
+          }
+        }
+      }
+    },
+
+    "ItemSoldOut": {
+      "description": "沽清状态结果（POS → KDS）：POS 对 KDS 申请的批复，或 POS 自己发起的沽清。★ 这是**菜单动作不是订单动作**，故 PosOrderNo 可缺省。批量品项用 Items 数组。",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Item.SoldOut" },
+        "Payload": {
+          "type": "object",
+          "required": ["Items"],
+          "additionalProperties": false,
+          "properties": {
+            "Items": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["Target", "Status"],
+                "additionalProperties": false,
+                "properties": {
+                  "Target": { "$ref": "common.schema.json#/$defs/SoldOutTarget" },
+                  "Status": { "$ref": "common.schema.json#/$defs/SoldOutStatus", "description": "Active 生效 / Rejected POS 否决 / Ended 已恢复（KDS 据此清掉『申请中』或『已沽清』标记）" },
+                  "SoldOutType": { "$ref": "common.schema.json#/$defs/SoldOutType", "description": "Status = Active 时必填" },
+                  "LimitQty": { "$ref": "common.schema.json#/$defs/Qty", "description": "仅 LimitedQty：限量份数" },
+                  "SoldQty": { "$ref": "common.schema.json#/$defs/Qty", "description": "仅 LimitedQty：已售份数（POS 侧权威计数）" },
+                  "StartAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset" },
+                  "EndAt": { "$ref": "common.schema.json#/$defs/DateTimeOffset", "description": "UntilTime：预定恢复时刻；Status = Ended 时为实际结束时刻" },
+                  "EndReason": { "$ref": "common.schema.json#/$defs/SoldOutEndReason" }
+                }
+              }
+            },
+            "ReasonCode": { "$ref": "common.schema.json#/$defs/SoldOutReasonCode" },
+            "Remark": { "type": "string", "maxLength": 200 },
+            "RequestedFrom": { "type": "string", "enum": ["Kds", "Pos"], "description": "谁发起的沽清：Kds = 批复 KDS 申请；Pos = POS 主动沽清" },
+            "ApprovedBy": { "type": "string", "maxLength": 64, "description": "POS 侧确认人（PosConfirm 模式）" },
+            "PosOrderNo": { "type": "string", "maxLength": 64, "description": "可选：若该沽清由某单触发（如最后一单卖掉最后一份），可关联；**通常为空**" }
+          }
+        }
+      }
+    },
+
+    "StaffSync": {
+      "description": "员工同步（POS → KDS）。只同步身份与角色映射，**绝不同步密码**；POS 删人 → 停用 + 撤销会话（§13.11.11）",
+      "allOf": [{ "$ref": "#/$defs/Base" }],
+      "properties": {
+        "EventType": { "const": "Staff.Sync" },
+        "Payload": {
+          "type": "object",
+          "required": ["SyncMode", "Staff"],
+          "additionalProperties": false,
+          "properties": {
+            "SyncMode": { "type": "string", "enum": ["Full", "Incremental"] },
+            "Staff": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["ExternalId", "Name", "PosRole", "IsActive"],
+                "additionalProperties": false,
+                "properties": {
+                  "ExternalId": { "type": "string", "maxLength": 64 },
+                  "StaffNo": { "type": "string", "maxLength": 64, "description": "工号，可用作 KDS 账号名" },
+                  "Name": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "PosRole": { "type": "string", "maxLength": 32, "description": "POS 角色名，由 PosRoleMapJson 映射；**未映射则不导入该人**" },
+                  "Position": { "type": "string", "maxLength": 32, "description": "岗位（炒锅/打荷/传菜…）" },
+                  "Phone": { "type": "string", "maxLength": 32 },
+                  "IsActive": { "type": "boolean", "description": "false = 离职/停用 → KDS 停用该账号并撤销其全部会话" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+  }
+}

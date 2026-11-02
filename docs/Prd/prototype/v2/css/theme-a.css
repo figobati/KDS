@@ -1,0 +1,38 @@
+/* ==========================================================================
+   KDS 原型 v2 · theme-a.css —— 主题 A「夜航控制台」（深色）
+   
+   职责：1) 在 <html data-theme="a"> 上重定义颜色令牌；
+         2) 少数必须写死色值 / 需要加深描边的组件覆盖。
+   加载：必须在 core.css 之后 —— 令牌与 :root 兜底同为 (0,1,0) 特异性，靠后来者胜。
+   切换：只改 <html data-theme> 属性，不需要换 CSS 文件；
+         与 theme-b.css 靠属性选择器互斥，两个文件可同时加载。
+/* ==========================================================================
+
+/* ---------- 主题 A · 夜航控制台 ---------- */
+[data-theme="a"]{
+  --bg-page:#0C1117; --bg-surface:#161D26; --bg-surface-2:#1D2733; --bg-elev:#232F3D;
+  --border:#2F3D4D; --border-strong:#46586C;
+  /* 三级文字阶：全部经 WCAG AA 校验（最低 4.9:1，最暗底 #232F3D 上仍达标） */
+  --text:#F0F5FB; --text-2:#B3BFCE; --text-3:#8B98A6;
+  --brand:#3D8BFF; --brand-hi:#5C9DFF; --brand-ink:#63A8FF; --on-brand:#fff;
+  --st-timeout:#FF7A7E; --st-warn:#FFC047; --st-urge:#FFC04D; --st-rush:#FF9B63;
+  --st-hold:#A8B2BF; --st-fire:#7FB8FF; --st-gift:#D4A8FF; --st-done:#5FE08C;
+  --tint-timeout:#1F1416; --tint-warn:#1E1911; --tint-hold:#171E26; --tint-cross:#231316;
+  --b-timeout-bg:#3A1418; --b-timeout-fg:#FF7A7E; --b-timeout-bd:#5C1E24;
+  --b-warn-bg:#3A2A10; --b-warn-fg:#FFC047; --b-warn-bd:#5C4415;
+  --b-hold-bg:#222B36; --b-hold-fg:#9AA5B3; --b-hold-bd:#33404F;
+  --b-done-bg:#12301E; --b-done-fg:#4FD07A; --b-done-bd:#1E4A2E;
+  --b-gift-bg:#2A1A3A; --b-gift-fg:#C08BFF; --b-gift-bd:#40285A;
+  --shadow-1:0 1px 0 rgba(255,255,255,.03), 0 10px 24px rgba(0,0,0,.35);
+  --shadow-2:0 30px 70px rgba(0,0,0,.6);
+  --warn-line:#FFC047; --warn-dot:#FFC047; --warn-chip:#B36E00;
+  --ro-warn-fg:#FF7A7E; --ro-warn-bg:#3A1418;
+  --ro-ok-fg:#5FE08C;   --ro-ok-bg:#12301E;
+  --row-line:rgba(255,255,255,.055);
+}
+[data-theme="a"] .tcard.tone-timeout{border-width:2px}
+[data-theme="a"] .tcard.tone-warn{border-width:2px}
+[data-theme="a"] .drow{background:rgba(255,255,255,.025)}
+[data-theme="a"] .cft{background:rgba(255,255,255,.03)}
+[data-theme="a"] .sft{background:rgba(255,255,255,.035)}
+[data-theme="a"] .scard.t-timeout .sft{background:rgba(255,122,126,.1)}

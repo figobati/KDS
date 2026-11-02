@@ -1,0 +1,667 @@
+/* ==========================================================================
+   KDS 原型 v2 · admin.css —— 管理端（桌面鼠标范式）
+   设计基准 1440×900，最小宽度 1280。
+
+   与作业屏（app.html + core.css）的三条界线：
+   1. 颜色 —— 本文件不出现任何色值字面量，一律 var(令牌)。
+      令牌由 core.css 的 :root 兜底、theme-a / theme-b 覆盖，靠 <html data-theme> 切换。
+      管理端额外定义一批 --adm-* 「语义别名」指向令牌，避免组件里散落 --st-* 造成语义漂移。
+   2. 类名 —— 全部 adm- 前缀，与作业屏零耦合。core.css 仍被引用来复用兜底令牌与字体栈，
+      但它的结构类（.top / .btn / .chip / .pager …）管理端一个都不用。
+   3. 尺寸 —— 作业屏是触屏（行高 48–86px、字号能 clamp 到 40px+），
+      管理端是鼠标（控件 34px、正文 14px、标题 16–22px），两套 clamp 不可混用。
+
+   抗文本膨胀：德语 2.2× / 俄语 2.3×。统一三件套防御：
+   clamp() 尺寸 + minmax(0,1fr) 轨道 + min-width:0 + text-overflow:ellipsis。
+   RTL：全部用逻辑属性（inset-inline / margin-inline / padding-inline / border-inline / text-align:end），
+   不出现 left / right。
+   ========================================================================== */
+
+/* ---------- 0. 字体栈（与 core.css 一致；显式重写一遍，便于管理端单独打开时也不掉字形） ---------- */
+body{
+  font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC","Segoe UI",-apple-system,sans-serif;
+}
+/* 粤语必须走繁体字形栈：简体字形（起、骨、内）的笔形港澳用户一眼看出不对味 */
+html:lang(yue) body{
+  font-family:"PingFang HK","Microsoft JhengHei","Noto Sans HK","PingFang TC","Microsoft YaHei",sans-serif;
+}
+/* 阿拉伯语：Naskh 字形 + Tahoma 兜底（Windows 上 Noto Naskh 未必有） */
+html:lang(ar) body, [dir="rtl"] body{
+  font-family:"Segoe UI","Tahoma","Noto Naskh Arabic","PingFang SC",sans-serif;
+}
+
+/* ---------- 1. 管理端尺寸令牌（不含任何颜色） ---------- */
+:root{
+  --adm-fs:14px;                      /* 正文 */
+  --adm-fs-2:13px;                    /* 次要 / 表头 / 元信息（下限，不再更小） */
+  --adm-fs-h1:clamp(18px,1.35vw,22px);/* 页头大标题 */
+  --adm-fs-h2:clamp(15px,1.05vw,16px);/* 卡片标题 */
+  --adm-fs-kpi:clamp(22px,1.9vw,30px);/* KPI 数值 */
+
+  --adm-r:10px;                       /* 卡片圆角 */
+  --adm-r-sm:7px;                     /* 控件圆角 */
+  --adm-pad:clamp(12px,1.15vw,20px);  /* 内容区外边距 / 卡片内边距 */
+  --adm-gap:clamp(10px,0.9vw,16px);   /* 栅格间距 */
+
+  --adm-ctl:34px;                     /* 输入框 / 下拉 / 按钮高度（鼠标范式） */
+  --adm-row:36px;                     /* 表格行高 */
+  --adm-nav-w:208px;                  /* 侧栏宽 */
+  --adm-top-h:52px;                   /* 顶栏高 */
+}
+
+/* ---------- 1.5 触控范式：只覆盖这 6 个尺寸令牌，其余样式全部复用 ----------
+   管理端默认按鼠标出图（34px 控件 / 36px 行高），但店里也会拿触摸一体机开这一端，
+   同一个 URL 要给办公室和门店两拨人各自合适的密度。
+   做法是「换令牌，不换样式表」：只在 .is-touch 下重算这 6 个值，
+   全端几十处引用（按钮、表格行、导航项、输入框、栅格间距）自动跟着变，
+   不需要第二套 admin-touch.css，也不会出现两套样式逐渐分叉。
+   为什么不用 calc(基准 + var(--touch)*增量)：自定义属性在 :root 上声明时，
+   其中的 var() 会在 :root 这一层就完成替换，后代拿到的是「已经算死」的值 ——
+   把 --touch 改成 1 也不会重算。这里直接写死两套字面值，行为可预期。
+   判定优先级：JS 按 matchMedia('(pointer:coarse)') 初始化 S.input，屏上对照位可手动覆盖。 */
+.adm.is-touch{
+  --adm-fs:15.5px;      /* 正文 14 → 15.5：手指点到的地方，1.1 倍是感知阈值 */
+  --adm-fs-2:14px;      /* 次要文本 13 → 14，不再有 13px 以下的字 */
+  --adm-ctl:46px;       /* 控件 34 → 46，高于 44 的触控下限 */
+  --adm-row:48px;       /* 表格行 36 → 48 */
+  --adm-nav-w:232px;    /* 侧栏 208 → 232，容纳放大后的导航文字 */
+  --adm-top-h:62px;     /* 顶栏 52 → 62，容纳放大后的分段控件 */
+}
+
+/* ---------- 2. 语义色别名（只指向令牌，不定义新颜色） ---------- */
+.adm{
+  --adm-ok:var(--st-done);
+  --adm-err:var(--st-timeout);
+  --adm-warn:var(--st-warn);
+  --adm-rush:var(--st-rush);
+  --adm-info:var(--brand);
+  --adm-ok-bg:var(--b-done-bg);     --adm-ok-fg:var(--b-done-fg);   --adm-ok-bd:var(--b-done-bd);
+  --adm-err-bg:var(--b-timeout-bg); --adm-err-fg:var(--b-timeout-fg);--adm-err-bd:var(--b-timeout-bd);
+  --adm-warn-bg:var(--b-warn-bg);   --adm-warn-fg:var(--b-warn-fg); --adm-warn-bd:var(--b-warn-bd);
+  --adm-info-bg:var(--b-hold-bg);   --adm-info-fg:var(--b-hold-fg); --adm-info-bd:var(--b-hold-bd);
+  --adm-brand-bg:var(--bg-elev);    --adm-brand-fg:var(--brand-ink);--adm-brand-bd:var(--border-strong);
+  --adm-tint-err:var(--tint-timeout);
+  --adm-tint-warn:var(--tint-warn);
+  --adm-tint-hold:var(--tint-hold);
+  --adm-line:var(--row-line);
+}
+
+/* ---------- 3. 骨架：顶栏与侧栏固定，只有内容区滚动 ---------- */
+#adm{
+  position:fixed; inset:0;
+  display:grid; grid-template-rows:auto minmax(0,1fr);
+  background:var(--bg-page); color:var(--text);
+  font-size:var(--adm-fs); line-height:1.5;
+}
+.adm-main{
+  display:grid; grid-template-columns:var(--adm-nav-w) minmax(0,1fr);
+  min-height:0; min-width:0;
+}
+.adm-content{
+  min-width:0; min-height:0; overflow:auto;
+  padding:var(--adm-pad);
+  display:flex; flex-direction:column; gap:var(--adm-gap);
+}
+/* 细滚动条：常隐形，悬停才显形（桌面端靠滚轮，不占宽度） */
+.adm-content::-webkit-scrollbar{width:8px;height:8px}
+.adm-content::-webkit-scrollbar-thumb{background:transparent;border-radius:4px}
+.adm-content:hover::-webkit-scrollbar-thumb{background:var(--border-strong)}
+.adm-view{display:flex;flex-direction:column;gap:var(--adm-gap);min-width:0}
+
+/* ---------- 4. 顶栏 ---------- */
+.adm-top{
+  display:flex; align-items:center; gap:clamp(6px,0.6vw,12px);
+  height:var(--adm-top-h); padding-inline:var(--adm-pad);
+  background:var(--bg-surface); border-bottom:1px solid var(--border);
+  min-width:0; overflow:hidden;
+}
+/* 品牌块允许收缩：俄语/德语下「数据更新于 …」很长，店名先截断，保住右侧控件完整 */
+.adm-brand{display:flex;align-items:baseline;gap:6px;flex:0 1 auto;min-width:0;max-width:34%}
+.adm-brand b{
+  font-size:15px;font-weight:800;letter-spacing:.01em;flex:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-brand span{
+  font-size:var(--adm-fs-2);color:var(--text-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;
+}
+.adm-top-sp{flex:1 1 0;min-width:0}
+.adm-cluster{display:flex;align-items:center;gap:8px;flex:0 1 auto;min-width:0}
+.adm-clabel{font-size:var(--adm-fs-2);color:var(--text-3);white-space:nowrap}
+.adm-vsep{flex:none;width:1px;height:20px;background:var(--border)}
+/* 分段控件：管理端的「语言 / 主题 / 时间范围」共用同一形态，认知成本最低 */
+.adm-seg{
+  display:flex;gap:2px;padding:2px;border-radius:var(--adm-r-sm);
+  background:var(--bg-surface-2);border:1px solid var(--border);flex:none;min-width:0;
+}
+.adm-seg button{
+  height:28px;padding-inline:9px;border-radius:5px;
+  font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);
+  min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-seg button:hover{background:var(--bg-elev);color:var(--text)}
+.adm-seg button.on{background:var(--brand);color:var(--on-brand)}
+.adm-clock{display:flex;align-items:baseline;gap:6px;flex:0 1 auto;min-width:0;overflow:hidden}
+.adm-clock .v{
+  font-size:var(--adm-fs-2);font-weight:700;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-clock .ttl{font-size:var(--adm-fs-2);color:var(--text-3);white-space:nowrap}
+.adm-iconbtn{
+  flex:none;width:30px;height:30px;border-radius:var(--adm-r-sm);
+  background:var(--bg-surface-2);border:1px solid var(--border);
+  color:var(--text-2);font-size:14px;line-height:1;display:grid;place-items:center;
+}
+.adm-iconbtn:hover{background:var(--bg-elev);color:var(--text)}
+
+/* ---------- 5. 侧栏 ---------- */
+.adm-nav{
+  min-width:0;overflow:auto;
+  background:var(--bg-surface);border-inline-end:1px solid var(--border);
+  padding-block:10px;display:flex;flex-direction:column;gap:2px;
+}
+.adm-navgrp{
+  font-size:var(--adm-fs-2);font-weight:800;color:var(--text-3);letter-spacing:.06em;
+  padding:10px 14px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-navitem{
+  display:flex;align-items:center;gap:8px;
+  height:var(--adm-row);margin-inline:8px;padding-inline:10px;
+  border-radius:var(--adm-r-sm);
+  font-size:var(--adm-fs);font-weight:600;color:var(--text-2);
+  text-align:start;min-width:0;
+}
+.adm-navitem .ico{width:16px;flex:none;text-align:center;font-size:13px}
+.adm-navitem .lb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-navitem:hover{background:var(--bg-elev);color:var(--text)}
+.adm-navitem.on{background:var(--brand);color:var(--on-brand);font-weight:700}
+/* 未实现项：灰显但保留位置 —— 评审时需要看到「这里将来有东西」，而不是凭空消失 */
+.adm-navitem.off{opacity:.45;cursor:not-allowed}
+.adm-navitem.off:hover{background:none;color:var(--text-2)}
+.adm-navitem .soon{
+  margin-inline-start:auto;font-size:11px;font-weight:700;flex:none;
+  color:var(--text-3);border:1px solid var(--border);border-radius:4px;padding:0 4px;
+}
+
+/* ---------- 6. 通用：页头 / 卡片 / 按钮 / 徽标 ---------- */
+.adm-hd{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;min-width:0}
+.adm-hd .tl{min-width:0;flex:1 1 auto}
+.adm-hd h1{
+  font-size:var(--adm-fs-h1);font-weight:800;letter-spacing:.01em;line-height:1.25;
+  overflow-wrap:anywhere;
+}
+.adm-hd .sub{font-size:var(--adm-fs-2);color:var(--text-2);overflow-wrap:anywhere}
+.adm-hd .acts{display:flex;align-items:center;gap:10px;flex:none;margin-inline-start:auto}
+.adm-sub{font-size:var(--adm-fs-2);color:var(--text-2);overflow-wrap:anywhere}
+
+.adm-card{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--adm-r);box-shadow:var(--shadow-1);
+  min-width:0;overflow:hidden;
+}
+.adm-card-hd{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;border-bottom:1px solid var(--adm-line);min-width:0;
+}
+.adm-card-hd h2{
+  font-size:var(--adm-fs-h2);font-weight:800;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.adm-card-hd .note{font-size:var(--adm-fs-2);color:var(--text-3);overflow-wrap:anywhere;flex:1 1 auto;min-width:0}
+.adm-card-hd .rt{margin-inline-start:auto;display:flex;align-items:center;gap:8px;flex:none}
+.adm-card-bd{padding:14px;min-width:0}
+
+.adm-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:var(--adm-ctl);padding-inline:12px;border-radius:var(--adm-r-sm);
+  background:var(--bg-surface-2);border:1px solid var(--border-strong);
+  color:var(--text);font-size:var(--adm-fs-2);font-weight:700;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-btn:hover{background:var(--bg-elev);border-color:var(--brand);color:var(--brand-ink)}
+.adm-btn.primary{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.adm-btn.primary:hover{background:var(--brand-hi);border-color:var(--brand-hi);color:var(--on-brand)}
+.adm-btn.quiet{background:var(--bg-surface);border-color:var(--border);color:var(--text-2)}
+.adm-btn.sm{height:28px;padding-inline:9px}
+.adm-btn[disabled]{opacity:.5;cursor:not-allowed}
+.adm-btn[disabled]:hover{background:var(--bg-surface-2);border-color:var(--border-strong);color:var(--text)}
+
+.adm-b{
+  display:inline-flex;align-items:center;gap:4px;flex:none;
+  height:22px;padding-inline:8px;border-radius:999px;
+  font-size:var(--adm-fs-2);font-weight:800;white-space:nowrap;border:1px solid transparent;
+}
+.adm-b.ok{background:var(--adm-ok-bg);color:var(--adm-ok-fg);border-color:var(--adm-ok-bd)}
+.adm-b.err{background:var(--adm-err-bg);color:var(--adm-err-fg);border-color:var(--adm-err-bd)}
+.adm-b.warn{background:var(--adm-warn-bg);color:var(--adm-warn-fg);border-color:var(--adm-warn-bd)}
+.adm-b.info{background:var(--adm-info-bg);color:var(--adm-info-fg);border-color:var(--adm-info-bd)}
+.adm-b.brand{background:var(--adm-brand-bg);color:var(--adm-brand-fg);border-color:var(--adm-brand-bd)}
+
+/* ---------- 7. dash：KPI / 图表 / 异常 / 排行 ---------- */
+.adm-kpis{
+  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--adm-gap);
+}
+.adm-kpi{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--adm-r);box-shadow:var(--shadow-1);
+  padding:12px 14px;min-width:0;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;gap:6px;
+}
+/* 左侧 3px 语义条：五个 KPI 并排时，靠颜色而不是读数字来区分「好指标 / 坏指标」 */
+.adm-kpi::before{content:"";position:absolute;inset-block:0;inset-inline-start:0;width:3px;background:var(--brand)}
+.adm-kpi.t-err::before{background:var(--adm-err)}
+.adm-kpi.t-warn::before{background:var(--adm-warn)}
+.adm-kpi.t-rush::before{background:var(--adm-rush)}
+.adm-kpi.t-info::before{background:var(--adm-info)}
+.adm-kpi .l{
+  font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);line-height:1.35;
+  /* 德语标签可达 2.2×，允许占两行后截断，不允许撑破卡片宽度 */
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  overflow-wrap:anywhere;min-height:2.7em;
+}
+.adm-kpi .v{
+  font-size:var(--adm-fs-kpi);font-weight:800;line-height:1.1;letter-spacing:-.01em;
+  display:flex;align-items:baseline;gap:4px;min-width:0;
+}
+.adm-kpi .v .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-kpi .v .u{font-size:.5em;font-weight:700;color:var(--text-3);white-space:nowrap}
+.adm-kpi .d{
+  font-size:var(--adm-fs-2);font-weight:700;display:flex;align-items:center;gap:5px;
+  min-width:0;overflow:hidden;
+}
+.adm-kpi .d .t{flex:none;white-space:nowrap}
+.adm-kpi .d .vs{
+  color:var(--text-3);font-weight:600;white-space:nowrap;
+  min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;
+}
+.adm-kpi .d.up{color:var(--adm-err)}
+.adm-kpi .d.down{color:var(--adm-ok)}
+.adm-kpi .d.good{color:var(--adm-ok)}
+.adm-kpi .d.bad{color:var(--adm-err)}
+
+.adm-charts{display:grid;grid-template-columns:minmax(0,1.9fr) minmax(0,1fr);gap:var(--adm-gap)}
+.adm-chart{width:100%;height:auto;display:block;max-width:100%}
+.adm-chart text{font-family:inherit}
+
+/* 异常提醒常驻：四条永远占位。若只在有异常时出现，评审会看不到「正常态长什么样」，
+   也会让人误以为这是告警弹窗而非固定模块 */
+.adm-alerts{display:flex;flex-direction:column}
+.adm-alert{
+  display:flex;align-items:center;gap:12px;
+  min-height:44px;padding:8px 14px;border-bottom:1px solid var(--adm-line);min-width:0;
+}
+.adm-alert:last-child{border-bottom:0}
+.adm-alert .ic{
+  flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  font-size:12px;font-weight:800;border:1px solid transparent;
+}
+.adm-alert.sev-err .ic{background:var(--adm-err-bg);color:var(--adm-err-fg);border-color:var(--adm-err-bd)}
+.adm-alert.sev-warn .ic{background:var(--adm-warn-bg);color:var(--adm-warn-fg);border-color:var(--adm-warn-bd)}
+.adm-alert.sev-info .ic{background:var(--adm-info-bg);color:var(--adm-info-fg);border-color:var(--adm-info-bd)}
+.adm-alert .nm{flex:1 1 auto;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-alert .ct{flex:none;font-size:var(--adm-fs-kpi);font-weight:800;min-width:2.2em;text-align:end}
+.adm-alert.sev-err .ct{color:var(--adm-err)}
+.adm-alert.sev-warn .ct{color:var(--adm-warn)}
+.adm-alert .u{flex:none;font-size:var(--adm-fs-2);color:var(--text-3);white-space:nowrap}
+
+.adm-ranks{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,320px);gap:var(--adm-gap)}
+.adm-rank{display:flex;flex-direction:column}
+.adm-rankrow{
+  display:flex;align-items:center;gap:10px;min-height:var(--adm-row);
+  padding:0 14px;border-bottom:1px solid var(--adm-line);min-width:0;
+}
+.adm-rankrow:last-child{border-bottom:0}
+.adm-rankrow .rk{
+  flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;
+  font-size:var(--adm-fs-2);font-weight:800;background:var(--bg-surface-2);color:var(--text-2);
+  border:1px solid var(--border);
+}
+.adm-rankrow.top .rk{background:var(--brand);color:var(--on-brand);border-color:var(--brand)}
+.adm-rankrow .nm{flex:1 1 auto;min-width:0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-rankrow .cat{flex:none;font-size:var(--adm-fs-2);color:var(--text-3);white-space:nowrap;max-width:34%;overflow:hidden;text-overflow:ellipsis}
+.adm-rankrow .qt{flex:none;font-weight:800;min-width:3.2em;text-align:end}
+.adm-rankrow .fl{flex:none}
+/* 酒水行加一条饮品色角标：主榜里「哪些是饮品」要肉眼可辨，这正是决策点所在 */
+.adm-rankrow.drink .nm::after{
+  content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:var(--adm-info);margin-inline-start:6px;vertical-align:middle;
+}
+.adm-switchline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.adm-switchline .hint{font-size:var(--adm-fs-2);color:var(--text-3);flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
+.adm-switch{display:inline-flex;align-items:center;gap:8px;flex:none;cursor:pointer}
+.adm-switch .lb{font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);white-space:nowrap}
+.adm-switch .kn{
+  flex:none;width:38px;height:22px;border-radius:11px;background:var(--border-strong);
+  position:relative;border:1px solid var(--border-strong);
+}
+.adm-switch .kn::after{
+  content:"";position:absolute;inset-block-start:2px;inset-inline-start:2px;
+  width:16px;height:16px;border-radius:50%;background:var(--bg-surface);
+  border:1px solid var(--border-strong);transition:transform .18s ease;
+}
+.adm-switch.on .kn{background:var(--brand);border-color:var(--brand)}
+.adm-switch.on .kn::after{transform:translateX(16px)}
+[dir="rtl"] .adm-switch.on .kn::after{transform:translateX(-16px)}
+
+/* ---------- 8. 表格（C8 组件风格） ---------- */
+.adm-tblwrap{overflow-x:auto;min-width:0}
+.adm-tbl{width:100%;min-width:660px;border-collapse:collapse;table-layout:fixed}
+.adm-tbl caption{text-align:start;font-size:var(--adm-fs-2);color:var(--text-3);padding-bottom:6px}
+.adm-tbl th,.adm-tbl td{
+  padding:0 12px;height:var(--adm-row);
+  text-align:start;vertical-align:middle;
+  border-bottom:1px solid var(--adm-line);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 表头吸顶：滚动容器是 .adm-content，th 用 sticky 直接贴内容区顶边 */
+.adm-tbl thead th{
+  position:sticky;top:0;z-index:2;
+  background:var(--bg-surface-2);border-bottom:1px solid var(--border-strong);
+  font-size:var(--adm-fs-2);font-weight:800;color:var(--text-2);letter-spacing:.02em;
+}
+.adm-tbl tbody tr:nth-child(even){background:var(--bg-surface-2)}
+.adm-tbl tbody tr:hover{background:var(--bg-elev)}
+.adm-tbl .num{text-align:end;font-variant-numeric:tabular-nums}
+.adm-tbl tfoot td{
+  height:40px;font-weight:800;background:var(--bg-surface-2);
+  border-top:1px solid var(--border-strong);border-bottom:0;
+}
+/* 合并行：损耗总览的「合计」用一条上边框 + 底色断开，读起来是「上面这些的汇总」 */
+.adm-tbl tfoot .num{font-size:15px}
+.adm-col-i{width:30%}
+.adm-col-c{width:16%}
+.adm-col-n{width:14%}
+
+/* 损耗总览：退菜 + 报损 + 合计必须在同一行里读完，
+   拆成两张卡会让人只记住其中一半，所以这里用 = 号把公式画出来 */
+.adm-loss{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.adm-loss .it{
+  display:flex;align-items:baseline;gap:6px;min-width:0;
+  padding:8px 14px;border-radius:var(--adm-r-sm);
+  background:var(--bg-surface-2);border:1px solid var(--border);
+}
+.adm-loss .it .l{font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);white-space:nowrap}
+.adm-loss .it .v{font-size:24px;font-weight:800;line-height:1.1}
+.adm-loss .it .u{font-size:var(--adm-fs-2);font-weight:700;color:var(--text-3);white-space:nowrap}
+.adm-loss .it.tot{
+  background:var(--adm-tint-warn);border-color:var(--adm-warn-bd);
+}
+.adm-loss .it.tot .v{color:var(--adm-warn-fg)}
+.adm-loss .op{font-size:20px;font-weight:800;color:var(--text-3);flex:none}
+
+/* ---------- 9. health：汇总条 / 分组 / 矩阵 ---------- */
+.adm-sum{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;border:1px solid var(--border);border-radius:var(--adm-r);
+  background:var(--bg-surface);box-shadow:var(--shadow-1);min-width:0;
+}
+.adm-sum .it{display:inline-flex;align-items:center;gap:6px;font-size:var(--adm-fs);font-weight:700;white-space:nowrap}
+.adm-sum .it b{font-size:16px;font-weight:800}
+.adm-sum .it.err{color:var(--adm-err)}
+.adm-sum .it.warn{color:var(--adm-warn)}
+.adm-sum .it.info{color:var(--adm-info-fg)}
+.adm-sum .it.ok{color:var(--adm-ok)}
+.adm-sum .blk{
+  margin-inline-start:auto;font-size:var(--adm-fs-2);font-weight:800;color:var(--adm-err-fg);
+  background:var(--adm-err-bg);border:1px solid var(--adm-err-bd);
+  border-radius:var(--adm-r-sm);padding:3px 10px;white-space:nowrap;
+}
+.adm-groups{display:flex;flex-direction:column;gap:var(--adm-gap)}
+.adm-grp{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--adm-r);box-shadow:var(--shadow-1);min-width:0;overflow:hidden;
+}
+.adm-grp > summary{
+  display:flex;align-items:center;gap:10px;cursor:pointer;list-style:none;
+  padding:10px 14px;min-width:0;
+}
+.adm-grp > summary::-webkit-details-marker{display:none}
+.adm-grp > summary:hover{background:var(--bg-elev)}
+.adm-grp > summary .cv{flex:none;font-size:11px;color:var(--text-3);transition:transform .18s}
+.adm-grp[open] > summary .cv{transform:rotate(90deg)}
+[dir="rtl"] .adm-grp[open] > summary .cv{transform:rotate(-90deg)}
+.adm-grp > summary .nm{flex:none;font-size:var(--adm-fs-h2);font-weight:800;white-space:nowrap}
+.adm-grp > summary .ps{
+  flex:none;font-size:var(--adm-fs-2);font-weight:800;color:var(--adm-ok-fg);
+  background:var(--adm-ok-bg);border:1px solid var(--adm-ok-bd);
+  border-radius:var(--adm-r-sm);padding:2px 9px;white-space:nowrap;
+}
+.adm-grp > summary .ar{margin-inline-start:auto;display:flex;gap:6px;flex:none}
+.adm-hitems{display:flex;flex-direction:column;border-top:1px solid var(--adm-line)}
+.adm-hitem{
+  display:flex;align-items:center;gap:10px;min-height:40px;
+  padding:6px 14px;border-bottom:1px solid var(--adm-line);min-width:0;
+}
+.adm-hitem:last-child{border-bottom:0}
+.adm-hitem .ic{
+  flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  font-size:11px;font-weight:800;border:1px solid transparent;
+}
+.adm-hitem.st-ok .ic{background:var(--adm-ok-bg);color:var(--adm-ok-fg);border-color:var(--adm-ok-bd)}
+.adm-hitem.st-err .ic{background:var(--adm-err-bg);color:var(--adm-err-fg);border-color:var(--adm-err-bd)}
+.adm-hitem.st-warn .ic{background:var(--adm-warn-bg);color:var(--adm-warn-fg);border-color:var(--adm-warn-bd)}
+.adm-hitem.st-info .ic{background:var(--adm-info-bg);color:var(--adm-info-fg);border-color:var(--adm-info-bd)}
+.adm-hitem .tx{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.adm-hitem .tx .n{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-hitem .tx .d{font-size:var(--adm-fs-2);color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-hitem .ac{flex:none}
+/* Error 行整行铺一层极淡红底：三级状态里只有 Error 阻断保存，必须一眼扫到 */
+.adm-hitem.st-err{background:var(--adm-tint-err)}
+.adm-hitem.st-warn{background:var(--adm-tint-warn)}
+
+/* B-19 路由矩阵下钻 */
+.adm-mx{width:100%;min-width:720px;border-collapse:collapse;table-layout:fixed}
+.adm-mx th,.adm-mx td{
+  height:34px;padding:0 8px;border:1px solid var(--adm-line);
+  text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.adm-mx thead th{
+  position:sticky;top:0;z-index:2;background:var(--bg-surface-2);
+  border-bottom:1px solid var(--border-strong);font-size:var(--adm-fs-2);font-weight:800;color:var(--text-2);
+}
+.adm-mx th.rowh{
+  text-align:start;background:var(--bg-surface-2);font-weight:700;
+  position:sticky;inset-inline-start:0;z-index:1;
+}
+.adm-mx thead th.rowh{z-index:3;inset-inline-start:0}
+.adm-mx td.c-ok{background:var(--adm-ok-bg)}
+.adm-mx td.c-part{background:var(--adm-warn-bg)}
+.adm-mx td.c-none{background:var(--bg-surface-2)}
+.adm-mx td.c-bad{background:var(--adm-err-bg)}
+.adm-mxs{font-size:15px;font-weight:800;line-height:1}
+.adm-mxs.ok{color:var(--adm-ok-fg)}
+.adm-mxs.part{color:var(--adm-warn-fg)}
+.adm-mxs.none{color:var(--text-3)}
+.adm-mxs.bad{color:var(--adm-err-fg)}
+.adm-legend{display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 0 0;min-width:0}
+.adm-legend .lg{display:inline-flex;align-items:center;gap:6px;font-size:var(--adm-fs-2);color:var(--text-2);white-space:nowrap}
+
+/* ---------- 10. wizard ---------- */
+.adm-steps{
+  display:flex;align-items:stretch;gap:0;flex-wrap:wrap;
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--adm-r);box-shadow:var(--shadow-1);padding:12px 14px;min-width:0;
+}
+.adm-step{
+  display:flex;align-items:center;gap:8px;flex:1 1 150px;min-width:0;padding-inline:6px;
+}
+.adm-step .no{
+  flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  font-size:var(--adm-fs-2);font-weight:800;
+  background:var(--bg-surface-2);border:1px solid var(--border-strong);color:var(--text-2);
+}
+.adm-step .lb{
+  font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;
+}
+.adm-step.done .no{background:var(--adm-ok-bg);border-color:var(--adm-ok-bd);color:var(--adm-ok-fg)}
+.adm-step.done .lb{color:var(--text)}
+.adm-step.cur .no{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.adm-step.cur .lb{color:var(--text);font-weight:800}
+.adm-step .ln{flex:1 1 12px;min-width:8px;height:1px;background:var(--border-strong)}
+.adm-step.done .ln{background:var(--adm-ok)}
+
+.adm-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px var(--adm-gap);min-width:0}
+.adm-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.adm-field.full{grid-column:1 / -1}
+.adm-field > label{
+  font-size:var(--adm-fs-2);font-weight:700;color:var(--text-2);
+  display:flex;align-items:center;gap:6px;min-width:0;
+}
+.adm-field > label .req{color:var(--adm-err);font-weight:800}
+.adm-inp{
+  height:var(--adm-ctl);padding-inline:10px;border-radius:var(--adm-r-sm);
+  background:var(--bg-surface-2);border:1px solid var(--border-strong);
+  color:var(--text);font-size:var(--adm-fs);font-family:inherit;width:100%;min-width:0;
+}
+.adm-inp:hover{border-color:var(--brand)}
+.adm-inp[readonly]{background:var(--bg-elev);color:var(--text-2);cursor:default}
+.adm-inp[readonly]:hover{border-color:var(--border-strong)}
+.adm-hint{font-size:var(--adm-fs-2);color:var(--text-3);overflow-wrap:anywhere}
+.adm-warn{font-size:var(--adm-fs-2);font-weight:700;color:var(--adm-err);overflow-wrap:anywhere}
+.adm-notice{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;border-radius:var(--adm-r-sm);
+  background:var(--adm-warn-bg);border:1px solid var(--adm-warn-bd);
+  color:var(--adm-warn-fg);font-size:var(--adm-fs-2);font-weight:700;min-width:0;
+}
+.adm-notice.info{background:var(--adm-info-bg);border-color:var(--adm-info-bd);color:var(--adm-info-fg)}
+.adm-notice.err{background:var(--adm-err-bg);border-color:var(--adm-err-bd);color:var(--adm-err-fg)}
+.adm-notice .ac{margin-inline-start:auto;flex:none}
+.adm-radios{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;min-width:0}
+.adm-radio{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;min-width:0;cursor:pointer;
+  background:var(--bg-surface-2);border:1.5px solid var(--border);border-radius:var(--adm-r-sm);
+}
+.adm-radio:hover{border-color:var(--brand)}
+.adm-radio .dt{flex:none;width:16px;height:16px;border-radius:50%;border:2px solid var(--border-strong);position:relative}
+.adm-radio.on{border-color:var(--brand);background:var(--bg-elev)}
+.adm-radio.on .dt{border-color:var(--brand)}
+.adm-radio.on .dt::after{
+  content:"";position:absolute;inset:3px;border-radius:50%;background:var(--brand);
+}
+.adm-radio .tx{min-width:0;display:flex;flex-direction:column;gap:2px}
+.adm-radio .tx b{font-size:var(--adm-fs);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-radio .tx span{font-size:var(--adm-fs-2);color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-segs{display:flex;flex-direction:column;min-width:0;border:1px solid var(--border);border-radius:var(--adm-r-sm);overflow:hidden}
+.adm-segrow{
+  display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;
+  border-bottom:1px solid var(--adm-line);min-width:0;
+}
+.adm-segrow:last-child{border-bottom:0}
+.adm-segrow .nm{flex:1 1 auto;min-width:0;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-segrow .tm{display:flex;align-items:center;gap:6px;flex:none}
+.adm-segrow .tm .adm-inp{width:82px;height:32px;text-align:center}
+.adm-chk{
+  flex:none;width:18px;height:18px;border-radius:5px;border:1.5px solid var(--border-strong);
+  background:var(--bg-surface);display:grid;place-items:center;color:transparent;font-size:11px;font-weight:800;
+}
+.adm-chk.on{background:var(--brand);border-color:var(--brand);color:var(--on-brand)}
+.adm-prog{display:flex;flex-direction:column;gap:10px;min-width:0}
+.adm-progrow{display:flex;flex-direction:column;gap:5px;min-width:0}
+.adm-progrow .top{display:flex;align-items:center;gap:8px;font-size:var(--adm-fs-2);min-width:0}
+.adm-progrow .top .nm{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.adm-progrow .top .pc{margin-inline-start:auto;flex:none;font-weight:800}
+.adm-bar{height:8px;border-radius:4px;background:var(--bg-surface-2);border:1px solid var(--border);overflow:hidden}
+.adm-bar i{display:block;height:100%;background:var(--brand);border-radius:4px}
+.adm-bar.ok i{background:var(--adm-ok)}
+.adm-bar.err i{background:var(--adm-err)}
+.adm-wzfoot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.adm-wzfoot .sp{flex:1 1 auto;min-width:0}
+.adm-footnote{font-size:var(--adm-fs-2);color:var(--text-3);overflow-wrap:anywhere}
+
+/* ---------- 11. 提示条（替代 alert） ---------- */
+.adm-toast{
+  position:fixed;inset-block-end:24px;inset-inline-start:50%;transform:translateX(-50%) translateY(12px);
+  z-index:90;max-width:min(560px,86vw);
+  padding:10px 16px;border-radius:var(--adm-r-sm);
+  background:var(--bg-elev);border:1px solid var(--border-strong);
+  box-shadow:var(--shadow-2);color:var(--text);
+  font-size:var(--adm-fs-2);font-weight:700;
+  opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;
+  display:flex;align-items:center;gap:8px;
+}
+.adm-toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.adm-toast .ico{
+  flex:none;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  background:var(--adm-info-bg);color:var(--adm-info-fg);border:1px solid var(--adm-info-bd);font-size:11px;
+}
+.adm-toast .tx{min-width:0;overflow-wrap:anywhere}
+
+/* ---------- 12. 键盘可达：统一的焦点环 ---------- */
+.adm button:focus-visible,
+.adm a:focus-visible,
+.adm input:focus-visible,
+.adm select:focus-visible,
+.adm summary:focus-visible,
+.adm [tabindex]:focus-visible{
+  outline:2px solid var(--brand);outline-offset:2px;
+}
+
+/* ---------- 13. 窄屏兜底（最小 1280；再窄只做降级，不允许横向溢出） ---------- */
+@media (max-width:1200px){
+  .adm-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .adm-charts{grid-template-columns:minmax(0,1fr)}
+  .adm-ranks{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:1024px){
+  .adm-main{grid-template-columns:minmax(0,1fr)}
+  .adm-nav{display:none}
+  .adm-form{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ---------- 14. 触控范式细则：只在 .is-touch 时生效 ----------
+   令牌只解决「多大」，这一节解决「手指能不能用」。
+   鼠标靠 hover 表达「这里能点」，触控没有 hover —— 只能靠尺寸、常显和按压反馈。 */
+
+/* 命中区下限 44×44（WCAG 2.5.5 / AA 的 44pt 基准）。
+   .adm-btn.sm 与分段控件的基础高度是 28px，min-height 会压住它，
+   所以这里不必逐条改 height —— 但宽度要显式给，28px 宽的垃圾桶图标手指点不中。 */
+.adm.is-touch .adm-btn,
+.adm.is-touch .adm-iconbtn,
+.adm.is-touch .adm-seg button,
+.adm.is-touch .adm-navitem,
+.adm.is-touch .adm-inp,
+.adm.is-touch .adm-radio,
+.adm.is-touch .adm-switch{ min-height:44px; }
+.adm.is-touch .adm-btn,
+.adm.is-touch .adm-iconbtn,
+.adm.is-touch .adm-seg button{ min-width:44px; }
+/* 小按钮放大后左右内边距也要跟上，否则文字贴着 44px 的边，看着像被裁过 */
+.adm.is-touch .adm-btn.sm,
+.adm.is-touch .adm-seg button{ padding-inline:12px; }
+/* 顶栏的图标按钮原本是正方形，触控下给到 44×44 的同时不能撑高顶栏两倍 */
+.adm.is-touch .adm-iconbtn{ width:44px; height:44px; }
+
+/* 去掉点按延迟与灰蓝色高亮块：不写这两条，触摸操作会有明显的「慢半拍」和脏指印。 */
+.adm.is-touch [data-act],
+.adm.is-touch .adm-inp{ touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+
+/* 按压态替代 hover：手指按下必须有反馈，否则会连点两次。 */
+.adm.is-touch [data-act]:active{
+  transform:translateY(1px);
+  background:var(--bg-elev); border-color:var(--brand);
+}
+.adm.is-touch .adm-btn.primary:active{ background:var(--brand-hi); border-color:var(--brand-hi); }
+
+/* 滚动条常显：鼠标靠滚轮，手指只能拖条 —— 隐形滚动条在触控下等于「看不出还有内容」。 */
+.adm.is-touch .adm-content::-webkit-scrollbar-thumb{ background:var(--border-strong); }
+.adm.is-touch .adm-content{ scrollbar-width:thin; }
+
+/* 悬停才显形的行内操作，在触控下改为常显（hover 永远不会触发）。 */
+.adm.is-touch .adm-hoveronly{ opacity:1; visibility:visible; }
+
+/* info 徽标 / 图表不是交互元素，不套 44px，否则会把卡片撑变形。只放大到 26px 更耐看。 */
+.adm.is-touch .adm-b{ height:26px; padding-inline:10px; }
+
+/* ---------- 15. 评审对照位（不是产品功能，交付前整块删掉） ----------
+   虚线边框 + 灰色选中态，刻意与品牌蓝的产品控件区分开：
+   评审时要能一眼看出「这个开关是给我们看方案的，不是给店长用的」。 */
+.adm-seg.review{
+  border-style:dashed; border-color:var(--border-strong); background:transparent;
+}
+.adm-seg.review button{ color:var(--text-3); }
+.adm-seg.review button:hover{ background:var(--bg-elev); color:var(--text-2); }
+.adm-seg.review button.on{
+  background:var(--text-3); border-color:var(--text-3); color:var(--bg-surface);
+}
