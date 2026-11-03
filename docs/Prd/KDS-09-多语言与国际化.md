@@ -58,7 +58,7 @@ POS 推 LocalizedText {"zh-CN":"宫保鸡丁","en-US":"Kung Pao Chicken"}
 |----|------|
 | 存储 | 程序内嵌资源文件（`Resources/Lang/{lang}.json`），可选门店级覆盖（`ScreenLangPack` 表，§9.15） |
 | 语言代码 | 标准 BCP-47：`zh-CN`、`zh-TW`、`en-US`、`ja-JP`（**V1 交付 `zh-CN` + `en-US` + `zh-TW`**；`ja-JP` / `ko-KR` 为 V1.1 评估） |
-| Key 命名 | 点分小驼峰：`scr.card.newOrder`、`common.action.complete`、`error.versionConflict.title`；**命名空间 13 个**（`common`/`status`/`view`/`scr`/`adm`/`cfg.store`/`cfg.terminal`/`error`/`void.reason`/`print`/`health`/`tts`/`wizard`），V1 冻结清单见 `docs/Design/2026-10-24-语言包key清单.md`（**761 条**，zh-CN 基准 100%） |
+| Key 命名 | 点分小驼峰：`scr.card.newOrder`、`common.action.complete`、`error.versionConflict.title`；**命名空间 13 个**（`common`/`status`/`view`/`scr`/`adm`/`cfg.store`/`cfg.terminal`/`error`/`void.reason`/`print`/`health`/`tts`/`wizard`），V1 冻结清单见 `docs/Design/2026-10-24-语言包key清单.md`（**761 条**，zh-CN 基准 100%）。**`print.*` 命名空间承载打印模板静态文本**（§16.5 方案 C：模板语言无关，静态文本走语言包 key，加语言只加语言包 json） |
 | 占位符 | **只用命名式** `{name}` / `{n}` / `{qty}` / `{duration}`；禁止位置式 `{0}`（§11.7 检查器仍兼容旧词条） |
 | 复数 | **不做 ICU 复数变形**，用不变短单位（`{qty} pcs` / `{n} min`）；确需单复数时用 `.one` / `.other` 成对 key |
 | 默认语言 | `StoreConfig.DefaultLang`（默认 `zh-CN`） |

@@ -75,6 +75,16 @@ Kds.sln
 - **领域命名中性**，禁止 POS 别名（`OrderInfo`/`BaseZhuoTai` 等一律禁用）
 - 术语分层：技术文档=「品项」`DishItem`；界面=「菜品」/自然语言（判定规则见 §1.5）
 
+## 双引擎实现约定（SQLite / SQL Server）
+
+- **写路径 EF Core 10**：LINQ 自动翻译两种方言，迁移归 EF Core；写路径**不手写 SQL**
+- **读路径 Dapper + SQL 方言归一化**：一套 SQL，执行前经 `ISqlDialect` 翻译器转目标方言。思想源自老系统 `docs/DataManager.cs` 的 `ChangeSql`——**只取思想，不搬代码**
+- 翻译器**规则表驱动**（`SqliteDialect` / `SqlServerDialect`），不用 `IndexOf`+`Replace` 硬编码
+- **不照搬**老系统的 `DataTable`/`DataSet`/`dynamic`/`?` 占位符那套 ADO.NET；KDS 保持强类型实体
+- **业务层不感知数据库差异**：不写 `if (UsingSqlServer)` 类分支、不手动做方言字符串替换；差异由 `ISqlDialect` 翻译器 + EF Core provider 透明处理
+- **时间字段全库格式统一**：SQLite 引擎下 `datetimeoffset` 按文本存储/比较，同一时间列禁止混用「带毫秒/不带毫秒、带时区/不带时区」变体，否则 `ORDER BY` 错序；接口层统一 ISO 8601 带时区（PRD §1.5），写库统一秒级精度
+- **兜底**：SQL 兼容性契约测试——同一 SQL 在两种引擎跑出相同结果集（扩展「双引擎 DDL 逐表对齐」思路）；`ChangeSql` 那 5-6 个替换点不够，分页/日期/UPSERT/GUID/拼接等差异靠翻译器 + 契约测试共同覆盖
+
 ## 常用命令
 
 ```bash
@@ -97,14 +107,19 @@ npx ajv-cli compile -s schema/outbound.schema.json -r schema/common.schema.json
 4. 入站 schema **严格**（`additionalProperties:false`）、出站**宽松**（`true`）
 5. SQL Server 2008 不做；主代码**不允许 `if(isSql2008)` 分支**
 6. 终端不直连数据库、不把配置存 localStorage
+7. **禁止 N+1 查询**：循环体内禁发 SQL；先一次查询取全量 → 内存 `Dictionary` 分组 → 循环内纯内存组装
+8. **日志/轨迹写入零反查**：快照字段（账单号/桌台名等）只用调用方内存现成值，不查库拼展示字段；拿不到留空
 
 ## 协作约定
 
 - 只改任务卡指定的文件；动契约外文件先在卡上申请
 - 核心模块（Kds.Core/Workflow）行覆盖 ≥70%；状态机/部分划单/MergeKey/档口反选/乐观锁/幂等 **每类至少 1 正 + 1 反用例**
+- 测试用隔离环境（临时 SQLite 快照），**禁止连真实/生产库**；禁止空断言——每个用例断言业务结果（返回值/状态变更/DB 写入）
 - 干完一张卡，往 `.hermes/journal/<年>-<月>.md` 当天小节追加 3~5 行
 - 一次只干一件事；重构与功能改动分开
 
 ## 变更记录
 
 - `2026-11-02` PM 建立：读 PRD v6.99，建本文件；工作目录绑定 `/home/tommy/software/kds`
+- `2026-11-02` 补「双引擎实现约定」：EF Core 写 + Dapper 读 + 方言翻译器（`docs/DataManager.cs` 只取 `ChangeSql` 思想，不搬代码）
+- `2026-11-02` 借鉴菜么么规范补工程铁律：业务层不感知 DB 差异、时间字段格式统一、禁 N+1、日志零反查、测试隔离与禁空断言

@@ -16,7 +16,8 @@ Kds.sln
 └── tests/
     ├── Kds.Core.Tests/        // 档口匹配、StagePath、状态机单测
     ├── Kds.Workflow.Tests/    // 引擎规则与边界用例
-    └── Kds.Api.Tests/         // 接口契约与幂等测试
+    ├── Kds.Api.Tests/         // 接口契约与幂等测试
+    └── Kds.AcceptanceTests/   // 验收/契约测试（M1-M15 + schema 24 条），独立项目
 ```
 
 **测试框架（v6.95 定案）**：
