@@ -425,6 +425,35 @@
             "maxLength": 32
           },
           "description": "扩展标记（如『少油』『不要葱』），KDS 只透传"
+        },
+        "Toppings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["ToppingId", "Name", "Qty"],
+            "additionalProperties": false,
+            "properties": {
+              "ToppingId": {
+                "type": "string",
+                "maxLength": 64,
+                "description": "配菜在 POS 侧的标识（退配菜时定位用，D18）"
+              },
+              "Name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "Qty": {
+                "$ref": "#/$defs/Qty"
+              },
+              "Unit": {
+                "type": "string",
+                "maxLength": 16,
+                "default": "份"
+              }
+            }
+          },
+          "description": "配菜/浇头/加料：挂在主菜上，不独立成行（D18）。KDS 入库合并为一条记录、跟主菜一起流转；只跟主菜（D3 归集不单独归配菜）。缺省空数组"
         }
       }
     },

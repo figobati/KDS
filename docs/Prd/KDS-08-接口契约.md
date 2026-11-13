@@ -99,6 +99,9 @@
       "IsGift": false,
       "TableId": "7f1a2b3c-0000-0000-0000-000000000001",
       "SpecialFlags": ["Allergy-Peanut"],
+      "Toppings": [
+        { "ToppingId": "TOP001", "Name": "大肉", "Qty": 1, "Unit": "份" }
+      ],
       "TargetStationIds": [],
       "IsComboItem": false,
       "ComboNo": null,
@@ -117,6 +120,7 @@
 > **外卖单**：无桌台时 `TableId` 传 `Guid.Empty`（全零 GUID），**不允许传 `null`**——业务唯一键与分组键都要求它非空；挂了桌台的外卖单则传真实 `TableId`。
 > **拼桌**：同桌已有进行中订单时，POS 必须显式传 `IsSharedTable = true`，否则返回 `TABLE_OCCUPIED`（防叠台）。
 > **套餐（§2.12）**：POS 必须**展开成子项**，每条子项一个 `LineNo`，`Qty` **已乘套餐份数**；同一套餐的子项共享 `ComboNo` 并各带 `ComboName` / `ComboSeq` / `ComboItemTotal`；**不得推送"套餐本体行"**（Master 忽略并记 `COMBO_HEADER_IGNORED`）。
+> **配菜/浇头（D18）**：配菜挂在主菜的 `Toppings[]` 上，**不独立成行**；KDS 入库合并为一条记录、**跟主菜一起流转**（划单/状态/出餐绑定）。**只跟主菜**——D3 合菜归集按主菜名归集，配菜不单独归集。POS 内部多行配菜结构由适配器收敛成 `Toppings[]`；**退配菜 = 主菜更新事件（`Order.Update`）移除对应 `ToppingId`**，不退独立行。
 
 **入站处理要求（必须实现）**：
 

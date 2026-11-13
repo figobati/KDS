@@ -85,6 +85,14 @@ Kds.sln
 - **时间字段全库格式统一**：SQLite 引擎下 `datetimeoffset` 按文本存储/比较，同一时间列禁止混用「带毫秒/不带毫秒、带时区/不带时区」变体，否则 `ORDER BY` 错序；接口层统一 ISO 8601 带时区（PRD §1.5），写库统一秒级精度
 - **兜底**：SQL 兼容性契约测试——同一 SQL 在两种引擎跑出相同结果集（扩展「双引擎 DDL 逐表对齐」思路）；`ChangeSql` 那 5-6 个替换点不够，分页/日期/UPSERT/GUID/拼接等差异靠翻译器 + 契约测试共同覆盖
 
+## 需求变更流（外部群 → 内部群评审）
+
+- 客户在「KDS需求讨论群」提的「要改」，由外部群 PM 落成 CR：`docs/requirements/changes/CR-<编号>-<slug>.md`，并登记到 `docs/requirements/变更台账.md`（状态=待内部评审）。
+- 外部群 PM **只记录不评估**：不猜工期、不给方案、不承诺版本（守则见根目录 `AGENTS-external.md`）。
+- 内部群（本群）讨论设计前，先读台账里状态=`待内部评审` 的行，逐条给结论：采纳 / 部分采纳 / 不采纳 + 做法要点 + 影响面 + 是否改契约。
+- 结论写回两处：台账「内部结论」列 + 对应 CR 文件的「内部结论」段。要改 PRD 的，按上文规则在 00 号文件追加一行。
+- 排期后才建卡；CR 编号与看板卡号互相引用。
+
 ## 常用命令
 
 ```bash
@@ -123,3 +131,4 @@ npx ajv-cli compile -s schema/outbound.schema.json -r schema/common.schema.json
 - `2026-11-02` PM 建立：读 PRD v6.99，建本文件；工作目录绑定 `/home/tommy/software/kds`
 - `2026-11-02` 补「双引擎实现约定」：EF Core 写 + Dapper 读 + 方言翻译器（`docs/DataManager.cs` 只取 `ChangeSql` 思想，不搬代码）
 - `2026-11-02` 借鉴菜么么规范补工程铁律：业务层不感知 DB 差异、时间字段格式统一、禁 N+1、日志零反查、测试隔离与禁空断言
+- `2026-11-09` 建立需求变更流：外部群 CR 台账（`docs/requirements/变更台账.md` + `changes/`），内部群评审后回填结论；外部群守则独立成 `AGENTS-external.md`
